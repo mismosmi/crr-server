@@ -1,4 +1,4 @@
-# Michel's vlcn-server
+# Michel's crr-server
 
 ## Setup
 Put a .env file in the root dir specifying SMTP credentials like
