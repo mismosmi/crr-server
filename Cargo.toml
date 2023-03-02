@@ -1,0 +1,15 @@
+[package]
+name = "vlcn-server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.69"
+dotenv = "0.15.0"
+lettre = "0.10.3"
+nanoid = "0.4.0"
+rocket = "0.5.0-rc.2"
+rusqlite = { version = "0.28.0", features = ["bundled", "load_extension"]}
+
