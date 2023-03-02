@@ -29,8 +29,8 @@ POST /auth/access_token
 (obviously with the refresh token cookie) to receive an access token via Set-Cookie header
 
 ```
-POST /database/<databaseName>/migrations/<migrationVersion>
+POST /database/<databaseName>/migrations/<migrationVersion> "?sql=<migrationCode>"
 ```
-to write a new migration
+to write a new migration. `<migrationVersion>` starts at 0.
 
 
