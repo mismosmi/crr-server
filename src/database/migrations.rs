@@ -1,4 +1,4 @@
-use rusqlite::named_params;
+use rusqlite::{named_params, OptionalExtension};
 
 use crate::error::Error;
 
@@ -40,7 +40,9 @@ pub(crate) fn post_migration(
     let meta = open_db()?;
 
     let current_version: i64 = meta
-        .prepare("SELECT MAX(version) FROM migrations WHERE database_name = :database_name")?
+        .prepare(
+            "SELECT IFNULL(MAX(version), -1) FROM migrations WHERE database_name = :database_name",
+        )?
         .query_row(named_params! { ":database_name": database }, |row| {
             row.get(0)
         })?;
