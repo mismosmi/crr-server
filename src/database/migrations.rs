@@ -1,62 +1,79 @@
+use std::collections::HashMap;
+
+use crate::{error::Error, metadata::Metadata};
 use rusqlite::named_params;
 
-use crate::error::Error;
+use super::Database;
 
-fn open_db() -> Result<rusqlite::Connection, Error> {
-    let conn = rusqlite::Connection::open("./data/migrations.sqlite3")?;
-
-    Ok(conn)
-}
-
-pub(crate) fn setup_db() -> Result<(), Error> {
-    let conn = open_db()?;
-
-    conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS migrations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            database_name TEXT NOT NULL,
-            version INTEGER,
-            statements TEXT NOT NULL,
-            applied INTEGER DEFAULT FALSE
-        );
-    ",
-    )?;
-
-    Ok(())
-}
-
-#[derive(rocket::FromForm)]
-pub(crate) struct PostMigrationRequestData<'a> {
-    sql: &'a str,
-}
-
-#[rocket::post("/<database>/migrations/<version>", data = "<data>")]
-pub(crate) fn post_migration(
+#[rocket::post("/<database>/migrations", data = "<data>")]
+pub(crate) fn post_migrations(
     database: &str,
-    version: i64,
-    data: rocket::form::Form<PostMigrationRequestData>,
+    data: rocket::form::Form<HashMap<&str, &str>>,
+    cookies: &rocket::http::CookieJar,
 ) -> Result<(), Error> {
-    let meta = open_db()?;
+    let user = crate::auth::User::authenticate(cookies)?;
 
-    let current_version: i64 = meta
-        .prepare(
-            "SELECT IFNULL(MAX(version), -1) FROM migrations WHERE database_name = :database_name",
-        )?
-        .query_row(named_params! { ":database_name": database }, |row| {
-            row.get(0)
-        })?;
+    let granted = user.owns_database(database)?;
 
-    if version != current_version + 1 {
-        return Err(Error::MigrationError(format!("Migration version must be exactly 1 larger than the previous migration. Expected {} received {}", current_version + 1, version)));
+    if !granted {
+        return Err(Error::Unauthorized(format!(
+            "User does not own database \"{}\"",
+            database
+        )));
     }
 
-    let db = super::open_db(database)?;
+    let mut db = Database::open(database.to_owned())?;
 
-    db.execute_batch(data.sql)?;
-
-    meta.prepare("INSERT INTO migrations (database_name, statements, applied) VALUES (:database_name, :statements, TRUE)")?
-        .insert(named_params! { ":database_name": database, ":statements": data.sql })?;
+    db.apply_migrations(&data)?;
 
     Ok(())
+}
+
+impl Database {
+    fn apply_migrations(&mut self, migrations: &HashMap<&str, &str>) -> Result<(), Error> {
+        let mut metadata = Metadata::open()?;
+
+        let mut latest_version: Option<i64> = metadata
+            .prepare("SELECT MAX(version) FROM migrations WHERE database_name = :database_name")?
+            .query_row(named_params! { ":database_name": self.name() }, |row| {
+                row.get(0)
+            })?;
+
+        let mut keys: Vec<&&str> = migrations.keys().collect();
+        keys.sort();
+
+        for key in keys {
+            if let Ok(version) = key.parse::<i64>() {
+                if let Some(latest_version) = latest_version {
+                    if version <= latest_version {
+                        continue;
+                    }
+                }
+
+                self.apply_migration(&mut metadata, version, migrations.get(key).unwrap())?;
+                latest_version = Some(version);
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_migration(
+        &mut self,
+        metadata: &mut Metadata,
+        version: i64,
+        sql: &str,
+    ) -> Result<(), Error> {
+        println!(
+            "Database \"{}\": Applying migration version {}",
+            self.name(),
+            version
+        );
+        self.execute_batch(sql)?;
+
+        metadata
+            .prepare("INSERT INTO migrations (version, statements) VALUES (:version, :statements)")?
+            .insert(named_params! { ":version": version, ":statements": sql })?;
+
+        Ok(())
+    }
 }

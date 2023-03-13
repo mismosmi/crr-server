@@ -1,7 +1,14 @@
-#[derive(rocket::Responder, Debug)]
-#[response(status = 500)]
+use std::string::FromUtf8Error;
+
+use rocket::{serde::Serialize, tokio};
+
+use crate::database::ChangeMessage;
+
+#[derive(rocket::Responder, Debug, Clone, Serialize)]
+#[serde(crate = "rocket::serde")]
 pub(crate) enum Error {
     DatabaseError(String),
+    #[response(status = 500)]
     ServerError(String),
     SmtpError(String),
     EnvVarError(String),
@@ -42,5 +49,29 @@ impl From<dotenv::Error> for Error {
 impl From<lettre::error::Error> for Error {
     fn from(value: lettre::error::Error) -> Self {
         Error::SmtpError(value.to_string())
+    }
+}
+
+impl From<FromUtf8Error> for Error {
+    fn from(value: FromUtf8Error) -> Self {
+        Error::ServerError("Failed to parse Text as utf8".to_owned())
+    }
+}
+
+impl From<tokio::sync::broadcast::error::SendError<ChangeMessage>> for Error {
+    fn from(value: tokio::sync::broadcast::error::SendError<ChangeMessage>) -> Self {
+        Error::ServerError("Internal message passing failure".to_owned())
+    }
+}
+
+impl From<tokio::sync::broadcast::error::RecvError> for Error {
+    fn from(value: tokio::sync::broadcast::error::RecvError) -> Self {
+        Error::ServerError("Internal message passing failure".to_owned())
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Error::ServerError("IO Error".to_owned())
     }
 }

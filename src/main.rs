@@ -2,8 +2,11 @@ mod auth;
 mod database;
 pub(crate) mod error;
 pub(crate) mod mail;
+mod metadata;
 
+use database::changes::ChangeManager;
 use error::Error;
+use metadata::Metadata;
 
 #[rocket::get("/")]
 fn index() -> &'static str {
@@ -14,16 +17,19 @@ fn index() -> &'static str {
 async fn main() -> Result<(), Error> {
     dotenv::dotenv()?;
 
-    auth::setup_db()?;
-    database::setup_db()?;
+    Metadata::open()?.apply_migrations()?;
 
     let _rocket = rocket::build()
+        .manage(ChangeManager::new())
         .mount("/", rocket::routes![index])
+        .mount("/auth", rocket::routes![auth::otp::otp, auth::token::token])
         .mount(
-            "/auth",
-            rocket::routes![auth::otp, auth::refresh_token, auth::access_token],
+            "/database",
+            rocket::routes![
+                database::migrations::post_migrations,
+                database::changes::changes
+            ],
         )
-        .mount("/database", rocket::routes![database::post_migration])
         .launch()
         .await?;
 
