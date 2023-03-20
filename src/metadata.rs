@@ -15,7 +15,7 @@ impl Metadata {
         })
     }
 
-    fn open_readonly() -> Result<Self, Error> {
+    pub(crate) fn open_readonly() -> Result<Self, Error> {
         Ok(Self {
             conn: rusqlite::Connection::open_with_flags(
                 "./data/metadata.sqlite3",
@@ -24,7 +24,15 @@ impl Metadata {
         })
     }
 
-    pub(crate) fn apply_migrations(&mut self) -> Result<(), Error> {
+    #[cfg(test)]
+    pub(crate) fn open_for_test(env: &crate::tests::TestEnv) -> Self {
+        Self {
+            conn: rusqlite::Connection::open(env.folder().join("metadata.sqlite3"))
+                .expect("failed to open metadata database"),
+        }
+    }
+
+    pub(crate) fn apply_migrations(&self) -> Result<(), Error> {
         let dir = fs::read_dir("./migrations")?;
 
         let mut latest_version: Option<i64> = self
@@ -60,7 +68,7 @@ impl Metadata {
         Ok(())
     }
 
-    fn apply_migration(&mut self, version: i64, sql: String) -> Result<(), Error> {
+    fn apply_migration(&self, version: i64, sql: String) -> Result<(), Error> {
         println!("Applying metadata migration version {}", version);
         self.execute_batch(&sql)?;
 

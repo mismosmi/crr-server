@@ -1,9 +1,9 @@
-use crate::error::Error;
+use crate::{error::Error, metadata::Metadata};
 use rusqlite::named_params;
 
 impl super::User {
-    pub(crate) fn owns_database(&self, database: &str) -> Result<bool, Error> {
-        let mut query = self.db.prepare(
+    pub(crate) fn owns_database(&self, meta: &Metadata, database: &str) -> Result<bool, Error> {
+        let mut query = meta.prepare(
             "
             SELECT TRUE 
             FROM database_owners

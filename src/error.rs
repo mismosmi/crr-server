@@ -13,7 +13,6 @@ pub(crate) enum Error {
     SmtpError(String),
     EnvVarError(String),
     Unauthorized(String),
-    MigrationError(String),
 }
 
 impl From<rusqlite::Error> for Error {
@@ -53,25 +52,25 @@ impl From<lettre::error::Error> for Error {
 }
 
 impl From<FromUtf8Error> for Error {
-    fn from(value: FromUtf8Error) -> Self {
+    fn from(_value: FromUtf8Error) -> Self {
         Error::ServerError("Failed to parse Text as utf8".to_owned())
     }
 }
 
 impl From<tokio::sync::broadcast::error::SendError<ChangeMessage>> for Error {
-    fn from(value: tokio::sync::broadcast::error::SendError<ChangeMessage>) -> Self {
+    fn from(_value: tokio::sync::broadcast::error::SendError<ChangeMessage>) -> Self {
         Error::ServerError("Internal message passing failure".to_owned())
     }
 }
 
 impl From<tokio::sync::broadcast::error::RecvError> for Error {
-    fn from(value: tokio::sync::broadcast::error::RecvError) -> Self {
+    fn from(_value: tokio::sync::broadcast::error::RecvError) -> Self {
         Error::ServerError("Internal message passing failure".to_owned())
     }
 }
 
 impl From<std::io::Error> for Error {
-    fn from(value: std::io::Error) -> Self {
+    fn from(_value: std::io::Error) -> Self {
         Error::ServerError("IO Error".to_owned())
     }
 }

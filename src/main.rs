@@ -3,6 +3,8 @@ mod database;
 pub(crate) mod error;
 pub(crate) mod mail;
 mod metadata;
+#[cfg(test)]
+mod tests;
 
 use database::changes::ChangeManager;
 use error::Error;
@@ -27,7 +29,7 @@ async fn main() -> Result<(), Error> {
             "/database",
             rocket::routes![
                 database::migrations::post_migrations,
-                database::changes::changes
+                database::changes::stream_changes
             ],
         )
         .launch()

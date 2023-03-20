@@ -3,16 +3,16 @@ use rocket::{
     response::stream::{Event, EventStream},
     tokio, State,
 };
-use rusqlite::named_params;
+use rusqlite::params_from_iter;
 
-use crate::{auth::User, error::Error};
+use crate::{auth::User, error::Error, metadata::Metadata};
 
 use super::{ChangeMessage, Changeset, Database};
 
 const CHANGE_BUFFER_SIZE: usize = 1_000_000;
 
 #[rocket::get("/<database>/changes?<site_id>&<db_version>")]
-pub(crate) async fn changes<'s, 'c, 'i>(
+pub(crate) async fn stream_changes<'s, 'c, 'i>(
     database: String,
     site_id: &'i str,
     db_version: i64,
@@ -25,6 +25,7 @@ where
 {
     EventStream! {
         let db = Database::open_readonly(database.clone(), db_version);
+        let meta = Metadata::open_readonly();
 
         if let Err(error) = db {
             yield Event::json(&error);
@@ -33,16 +34,23 @@ where
 
         let mut db = db.unwrap();
 
-        let user = User::authenticate(cookies);
-
-        if let Err(error) = user {
+        if let Err(error) = meta {
             yield Event::json(&error);
             return
         }
 
-        let user = user.unwrap();
+        let meta = meta.unwrap();
 
-        let changes = db.changes(&user, site_id);
+        let allowed_tables = User::authenticate(&meta, cookies).and_then(|user| user.readable_tables(&meta, db.name()));
+
+        if let Err(error) = allowed_tables {
+            yield Event::json(&error);
+            return
+        }
+
+        let allowed_tables = allowed_tables.unwrap();
+
+        let changes = db.changes(&allowed_tables, site_id);
 
         if let Err(error) = changes {
             yield Event::json(&error);
@@ -75,6 +83,12 @@ where
         while let Ok(changeset) = subscription.recv().await {
             match changeset {
                 Ok(changeset) => {
+                    if !allowed_tables.contains(&changeset.table) {
+                        continue
+                    }
+                    if std::str::from_utf8(&changeset.site_id) == Ok(site_id) {
+                        continue
+                    }
                     yield Event::json(&changeset)
                 },
                 Err(error) => {
@@ -86,18 +100,13 @@ where
     }
 }
 
-enum UpdateMessage {
-    Update,
-    Close,
-}
-
 pub(crate) struct ChangeManager {
     handles: tokio::sync::RwLock<
         std::collections::HashMap<
             String,
             (
                 tokio::sync::broadcast::Sender<ChangeMessage>,
-                tokio::sync::mpsc::Sender<UpdateMessage>,
+                tokio::sync::mpsc::Sender<()>,
             ),
         >,
     >,
@@ -130,37 +139,32 @@ impl ChangeManager {
     async fn add_handle(&self, database: Database) -> Result<Subscription, Error> {
         let (changes_sender, changes_receiver) =
             tokio::sync::broadcast::channel::<ChangeMessage>(32);
-        let (update_sender, update_receiver) = tokio::sync::mpsc::channel::<UpdateMessage>(32);
+        let (update_sender, update_receiver) = tokio::sync::mpsc::channel::<()>(1);
 
         let hook_update_sender = update_sender.clone();
 
         database.update_hook(Some(
             move |_action, _arg1: &'_ str, _arg2: &'_ str, _rowid| {
-                let _err = hook_update_sender.try_send(UpdateMessage::Update);
+                let _err = hook_update_sender.try_send(());
             },
         ));
 
         async fn process_changes(
             mut db: super::Database,
-            mut update_receiver: tokio::sync::mpsc::Receiver<UpdateMessage>,
+            mut update_receiver: tokio::sync::mpsc::Receiver<()>,
             changes_sender: tokio::sync::broadcast::Sender<Result<Changeset, Error>>,
         ) -> Result<(), Error> {
             for changeset in db.all_changes() {
                 changes_sender.send(changeset)?;
             }
 
-            while let Some(msg) = update_receiver.recv().await {
-                match msg {
-                    UpdateMessage::Update => {
-                        for changeset in db.all_changes() {
-                            changes_sender.send(changeset)?;
-                        }
-                    }
-                    UpdateMessage::Close => {
-                        if changes_sender.receiver_count() == 0 {
-                            return Ok(());
-                        }
-                    }
+            while let Some(_) = update_receiver.recv().await {
+                if changes_sender.receiver_count() == 0 {
+                    break;
+                }
+
+                for changeset in db.all_changes() {
+                    changes_sender.send(changeset)?;
                 }
             }
 
@@ -193,12 +197,12 @@ impl ChangeManager {
 
 pub(crate) struct Subscription {
     changes_receiver: tokio::sync::broadcast::Receiver<ChangeMessage>,
-    update_sender: tokio::sync::mpsc::Sender<UpdateMessage>,
+    update_sender: tokio::sync::mpsc::Sender<()>,
 }
 
 impl std::ops::Drop for Subscription {
     fn drop(&mut self) {
-        let _err = self.update_sender.try_send(UpdateMessage::Close);
+        let _err = self.update_sender.try_send(());
     }
 }
 
@@ -217,44 +221,42 @@ impl std::ops::DerefMut for Subscription {
 }
 
 impl Database {
-    fn changes<'d, 's>(
+    fn changes<'d, 's, 't>(
         &'d mut self,
-        user: &User,
+        allowed_tables: &'t Vec<String>,
         site_id: &'s str,
     ) -> Result<ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), Error> + 'd>, Error>
     where
         's: 'd,
+        't: 'd,
     {
-        let allowed_tables = user.readable_tables(self.name())?;
-
         Ok(ChangesIter::new(move || {
-            let query = "
-                SELECT table, pk, cid, val, col_version, db_version, site_id
-                FROM crsql_changes
-                WHERE db_version > :db_version
-                AND site_id <> :site_id
-                AND table IN :allowed_tables
-            ";
+            let query = format!(
+                "
+                    SELECT \"table\", pk, cid, val, col_version, db_version, site_id
+                    FROM crsql_changes
+                    WHERE db_version > {}
+                    AND site_id <> '{}'
+                    AND table IN ({})
+                ",
+                self.db_version,
+                site_id,
+                vec!["?"].repeat(allowed_tables.len()).join(", ")
+            );
 
             let mut buffer = Vec::<Changeset>::new();
-            let mut db_version = 0i64;
             let mut has_next_page = false;
 
             {
                 let mut buffer_size = 0usize;
 
-                let mut stmt = self.prepare(query)?;
+                let mut stmt = self.prepare(&query)?;
 
-                let mut rows = stmt.query(named_params! {
-                    ":db_version": self.db_version,
-                    ":site_id": site_id,
-                    ":allowed_tables": allowed_tables,
-                })?;
+                let mut rows = stmt.query(params_from_iter(allowed_tables))?;
 
                 while let Ok(Some(row)) = rows.next() {
                     let changeset: Changeset = row.try_into()?;
 
-                    db_version = changeset.db_version();
                     buffer_size += changeset.size();
 
                     buffer.push(changeset);
@@ -266,7 +268,10 @@ impl Database {
                 }
             }
 
-            self.db_version = db_version;
+            if let Some(changeset) = buffer.last() {
+                self.db_version = changeset.db_version
+            }
+
             Ok((buffer, has_next_page))
         }))
     }
@@ -276,23 +281,21 @@ impl Database {
     ) -> ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), Error> + 'd> {
         ChangesIter::new(move || {
             let query = "
-                SELECT table, pk, cid, val, col_version, db_version, site_id
+                SELECT \"table\", pk, cid, val, col_version, db_version, site_id
                 FROM crsql_changes
                 WHERE db_version > ?
             ";
 
             let mut buffer = Vec::<Changeset>::new();
-            let mut db_version = 0i64;
             let mut has_next_page = false;
 
             {
                 let mut buffer_size = 0usize;
                 let mut stmt = self.conn.prepare(query)?;
-                let mut rows = stmt.query([&db_version])?;
+                let mut rows = stmt.query([&self.db_version])?;
 
                 while let Some(row) = rows.next()? {
                     let changeset: Changeset = row.try_into()?;
-                    db_version = changeset.db_version;
                     buffer_size += changeset.size();
 
                     buffer.push(changeset);
@@ -302,6 +305,10 @@ impl Database {
                         break;
                     }
                 }
+            }
+
+            if let Some(changeset) = buffer.last() {
+                self.db_version = changeset.db_version;
             }
 
             Ok((buffer, has_next_page))
@@ -359,5 +366,69 @@ where
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{
+        database::{changes::ChangeManager, migrations::tests::setup_foo, Value},
+        tests::TestEnv,
+    };
+    use rocket::tokio;
+
+    #[test]
+    fn list_changes() {
+        let env = TestEnv::new();
+        setup_foo(&env);
+
+        let mut db = env.db();
+
+        {
+            let mut changes = db.all_changes();
+            assert!(changes.next().is_none());
+        }
+
+        db.execute("INSERT INTO foo (bar) VALUES (?)", ["baz"])
+            .expect("failed to insert row");
+
+        {
+            let mut changes = db.all_changes();
+            let changeset = changes
+                .next()
+                .expect("no changes registered")
+                .expect("error fetching changes");
+
+            assert_eq!(changeset.table, "foo");
+            assert_eq!(changeset.val, Value::text("baz"));
+
+            assert!(changes.next().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn react_to_changes() {
+        let env = TestEnv::new();
+        setup_foo(&env);
+
+        let change_manager = ChangeManager::new();
+
+        let mut sub = change_manager
+            .subscribe(env.db())
+            .await
+            .expect("Failed to set up subscription");
+
+        env.db()
+            .execute("INSERT INTO foo (bar) VALUES (?)", ["baz"])
+            .expect("Failed to insert data");
+
+        let changeset = sub
+            .recv()
+            .await
+            .expect("Failed to receive update")
+            .expect("Failed to retrieve updates");
+
+        assert_eq!(changeset.table, "foo")
     }
 }

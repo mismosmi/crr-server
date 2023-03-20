@@ -2,7 +2,7 @@ pub(crate) mod changes;
 pub(crate) mod migrations;
 
 use crate::error::Error;
-use rocket::serde::Serialize;
+use rocket::serde::{Deserialize, Serialize};
 use rusqlite::{
     types::{FromSql, ValueRef},
     LoadExtensionGuard, Row,
@@ -40,9 +40,11 @@ impl Database {
             ext = ext
         );
 
+        println!("load extension {}", extension_name);
+
         unsafe {
             let _guard = LoadExtensionGuard::new(conn)?;
-            conn.load_extension(extension_name, None)?;
+            conn.load_extension(extension_name, Some("sqlite3_crsqlite_init"))?;
         }
 
         Ok(())
@@ -74,6 +76,20 @@ impl Database {
             db_version,
         })
     }
+
+    #[cfg(test)]
+    pub(crate) fn open_for_test(env: &crate::tests::TestEnv) -> Self {
+        let conn = rusqlite::Connection::open(env.folder().join("data.sqlite3"))
+            .expect("Failed to open test database");
+
+        Self::load_crsqlite(&conn).expect("Failed to load crsqlite");
+
+        Self {
+            conn,
+            name: "data".to_owned(),
+            db_version: 0,
+        }
+    }
 }
 
 impl std::ops::Deref for Database {
@@ -90,7 +106,7 @@ impl std::ops::Drop for Database {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug, PartialEq, Deserialize)]
 #[serde(crate = "rocket::serde")]
 enum Value {
     Null,
@@ -110,6 +126,11 @@ impl Value {
             Self::Blob(value) => value.len(),
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn text(value: &str) -> Self {
+        Self::Text(format!("'{}'", value))
+    }
 }
 
 impl FromSql for Value {
@@ -127,7 +148,7 @@ impl FromSql for Value {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug)]
 #[serde(crate = "rocket::serde")]
 pub(crate) struct Changeset {
     table: String,
@@ -147,10 +168,6 @@ impl Changeset {
             + self.val.size()
             + 16
             + self.site_id.len()
-    }
-
-    fn db_version(&self) -> i64 {
-        self.db_version
     }
 }
 
