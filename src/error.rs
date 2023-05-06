@@ -7,12 +7,18 @@ use crate::database::ChangeMessage;
 #[derive(rocket::Responder, Debug, Clone, Serialize)]
 #[serde(crate = "rocket::serde")]
 pub(crate) enum Error {
+    #[response(status = 500)]
     DatabaseError(String),
     #[response(status = 500)]
     ServerError(String),
+    #[response(status = 500)]
     SmtpError(String),
+    #[response(status = 500)]
     EnvVarError(String),
+    #[response(status = 401)]
     Unauthorized(String),
+    #[response(status = 400)]
+    ValidationError(String),
 }
 
 impl From<rusqlite::Error> for Error {

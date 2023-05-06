@@ -4,8 +4,8 @@ pub(crate) mod migrations;
 use crate::error::Error;
 use rocket::serde::{Deserialize, Serialize};
 use rusqlite::{
-    types::{FromSql, ValueRef},
-    LoadExtensionGuard, Row,
+    types::{FromSql, ToSqlOutput, ValueRef},
+    LoadExtensionGuard, Row, ToSql,
 };
 
 pub(crate) struct Database {
@@ -135,20 +135,32 @@ impl Value {
 
 impl FromSql for Value {
     fn column_result(value: ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        use rusqlite::types::Value as RusqliteValue;
+
+        let value: RusqliteValue = value.into();
         match value {
-            ValueRef::Null => Ok(Self::Null),
-            ValueRef::Integer(value) => Ok(Self::Integer(value)),
-            ValueRef::Real(value) => Ok(Self::Real(value)),
-            ValueRef::Text(value) => Ok(Self::Text(
-                String::from_utf8(Vec::from(value))
-                    .map_err(|error| rusqlite::types::FromSqlError::Other(Box::new(error)))?,
-            )),
-            ValueRef::Blob(value) => Ok(Self::Blob(Vec::from(value))),
+            RusqliteValue::Blob(value) => Ok(Self::Blob(value)),
+            RusqliteValue::Integer(value) => Ok(Self::Integer(value)),
+            RusqliteValue::Real(value) => Ok(Self::Real(value)),
+            RusqliteValue::Null => Ok(Self::Null),
+            RusqliteValue::Text(value) => Ok(Self::Text(value)),
         }
     }
 }
 
-#[derive(Clone, Serialize, Debug)]
+impl ToSql for Value {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        match self {
+            Self::Blob(value) => Ok(ToSqlOutput::Borrowed(ValueRef::Blob(&value))),
+            Self::Integer(value) => Ok(ToSqlOutput::Borrowed(ValueRef::Integer(value.clone()))),
+            Self::Real(value) => Ok(ToSqlOutput::Borrowed(ValueRef::Real(value.clone()))),
+            Self::Null => Ok(ToSqlOutput::Borrowed(ValueRef::Null)),
+            Self::Text(value) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(value.as_bytes()))),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
 #[serde(crate = "rocket::serde")]
 pub(crate) struct Changeset {
     table: String,
@@ -157,6 +169,7 @@ pub(crate) struct Changeset {
     val: Value,
     col_version: i64,
     db_version: i64,
+    #[serde(with = "crate::serde_base64")]
     site_id: Vec<u8>,
 }
 

@@ -30,6 +30,13 @@ pub(crate) fn post_migrations(
     Ok(())
 }
 
+#[derive(Clone)]
+pub(crate) struct Migration {
+    database_name: String,
+    version: i64,
+    statements: String,
+}
+
 impl Database {
     fn apply_migrations(
         &mut self,
