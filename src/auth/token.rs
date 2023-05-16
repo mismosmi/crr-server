@@ -1,6 +1,6 @@
 use rusqlite::named_params;
 
-use crate::{error::Error, metadata::Metadata};
+use crate::{error::CRRError, metadata::Metadata};
 
 #[derive(rocket::FromForm)]
 pub(crate) struct TokenRequestData {
@@ -11,7 +11,7 @@ pub(crate) struct TokenRequestData {
 pub(crate) fn token(
     data: rocket::form::Form<TokenRequestData>,
     cookies: &rocket::http::CookieJar<'_>,
-) -> Result<(), Error> {
+) -> Result<(), CRRError> {
     let metadata = Metadata::open()?;
 
     let user_id: i64 = match data.otp.as_ref() {
@@ -22,7 +22,7 @@ pub(crate) fn token(
         None => {
             let token = cookies
                 .get(super::COOKIE_NAME)
-                .ok_or(Error::Unauthorized("Token Not Found".to_owned()))?
+                .ok_or(CRRError::Unauthorized("Token Not Found".to_owned()))?
                 .value();
 
             metadata

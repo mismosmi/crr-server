@@ -1,7 +1,7 @@
 pub(crate) mod changes;
 pub(crate) mod migrations;
 
-use crate::error::Error;
+use crate::error::CRRError;
 use rocket::serde::{Deserialize, Serialize};
 use rusqlite::{
     types::{FromSql, ToSqlOutput, ValueRef},
@@ -23,12 +23,12 @@ impl Database {
         format!("./data/databases/{}.sqlite3", name)
     }
 
-    fn load_crsqlite(conn: &rusqlite::Connection) -> Result<(), Error> {
+    fn load_crsqlite(conn: &rusqlite::Connection) -> Result<(), CRRError> {
         let os = match std::env::consts::OS {
             "macos" => "darwin",
             "windows" => "windows",
             "linux" => "linux",
-            os => return Err(Error::ServerError(format!("Unsupported OS: {}", os))),
+            os => return Err(CRRError::ServerError(format!("Unsupported OS: {}", os))),
         };
 
         let arch = std::env::consts::ARCH;
@@ -50,7 +50,7 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) fn open(name: String) -> Result<Self, Error> {
+    pub(crate) fn open(name: String) -> Result<Self, CRRError> {
         let conn = rusqlite::Connection::open(Self::file_name(&name))?;
 
         Self::load_crsqlite(&conn)?;
@@ -62,7 +62,7 @@ impl Database {
         })
     }
 
-    pub(crate) fn open_readonly(name: String, db_version: i64) -> Result<Self, Error> {
+    pub(crate) fn open_readonly(name: String, db_version: i64) -> Result<Self, CRRError> {
         let conn = rusqlite::Connection::open_with_flags(
             Self::file_name(&name),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -185,7 +185,7 @@ impl Changeset {
 }
 
 impl<'a> TryFrom<&Row<'a>> for Changeset {
-    type Error = Error;
+    type Error = CRRError;
 
     fn try_from(row: &Row<'a>) -> Result<Self, Self::Error> {
         Ok(Changeset {
@@ -200,4 +200,4 @@ impl<'a> TryFrom<&Row<'a>> for Changeset {
     }
 }
 
-pub(crate) type ChangeMessage = Result<Changeset, Error>;
+pub(crate) type ChangeMessage = Result<Changeset, CRRError>;

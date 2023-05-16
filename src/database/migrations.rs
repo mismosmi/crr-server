@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use crate::{error::Error, metadata::Metadata};
+use crate::{error::CRRError, metadata::Metadata};
+use rocket::{
+    serde::{self, Deserialize},
+    FromForm,
+};
 use rusqlite::named_params;
 
 use super::Database;
@@ -10,17 +14,19 @@ pub(crate) fn post_migrations(
     database: &str,
     data: rocket::form::Form<HashMap<&str, &str>>,
     cookies: &rocket::http::CookieJar,
-) -> Result<(), Error> {
-    let meta = Metadata::open()?;
-    let user = crate::auth::User::authenticate(&meta, cookies)?;
+) -> Result<(), CRRError> {
+    {
+        let meta = Metadata::open()?;
+        let user = crate::auth::User::authenticate(&meta, cookies)?;
 
-    let granted = user.owns_database(&meta, database)?;
+        let granted = user.owns_database(&meta, database)?;
 
-    if !granted {
-        return Err(Error::Unauthorized(format!(
-            "User does not own database \"{}\"",
-            database
-        )));
+        if !granted {
+            return Err(CRRError::Unauthorized(format!(
+                "User does not own database \"{}\"",
+                database
+            )));
+        }
     }
 
     let mut db = Database::open(database.to_owned())?;
@@ -30,11 +36,10 @@ pub(crate) fn post_migrations(
     Ok(())
 }
 
-#[derive(Clone)]
-pub(crate) struct Migration {
-    database_name: String,
-    version: i64,
-    statements: String,
+#[derive(FromForm, Deserialize)]
+#[serde(crate = "rocket::serde")]
+pub(crate) struct PostMigrationsData {
+    queries: Vec<String>,
 }
 
 impl Database {
@@ -42,7 +47,7 @@ impl Database {
         &mut self,
         meta: &Metadata,
         migrations: &HashMap<&str, &str>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), CRRError> {
         let mut latest_version: Option<i64> = meta
             .prepare("SELECT MAX(version) FROM migrations WHERE database_name = :database_name")?
             .query_row(named_params! { ":database_name": self.name() }, |row| {
@@ -67,7 +72,12 @@ impl Database {
         Ok(())
     }
 
-    fn apply_migration(&mut self, meta: &Metadata, version: i64, sql: &str) -> Result<(), Error> {
+    fn apply_migration(
+        &mut self,
+        meta: &Metadata,
+        version: i64,
+        sql: &str,
+    ) -> Result<(), CRRError> {
         println!(
             "Database \"{}\": Applying migration version {}",
             self.name(),

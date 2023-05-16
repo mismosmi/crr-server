@@ -2,20 +2,20 @@ use std::fs;
 
 use rusqlite::{named_params, OpenFlags};
 
-use crate::error::Error;
+use crate::error::CRRError;
 
 pub(crate) struct Metadata {
     conn: rusqlite::Connection,
 }
 
 impl Metadata {
-    pub(crate) fn open() -> Result<Self, Error> {
+    pub(crate) fn open() -> Result<Self, CRRError> {
         Ok(Self {
             conn: rusqlite::Connection::open("./data/metadata.sqlite3")?,
         })
     }
 
-    pub(crate) fn open_readonly() -> Result<Self, Error> {
+    pub(crate) fn open_readonly() -> Result<Self, CRRError> {
         Ok(Self {
             conn: rusqlite::Connection::open_with_flags(
                 "./data/metadata.sqlite3",
@@ -32,7 +32,7 @@ impl Metadata {
         }
     }
 
-    pub(crate) fn apply_migrations(&self) -> Result<(), Error> {
+    pub(crate) fn apply_migrations(&self) -> Result<(), CRRError> {
         let dir = fs::read_dir("./migrations")?;
 
         let mut latest_version: Option<i64> = self
@@ -68,7 +68,7 @@ impl Metadata {
         Ok(())
     }
 
-    fn apply_migration(&self, version: i64, sql: String) -> Result<(), Error> {
+    fn apply_migration(&self, version: i64, sql: String) -> Result<(), CRRError> {
         println!("Applying metadata migration version {}", version);
         self.execute_batch(&sql)?;
 

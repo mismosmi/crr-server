@@ -1,4 +1,4 @@
-use crate::{error::Error, metadata::Metadata};
+use crate::{error::CRRError, metadata::Metadata};
 
 #[derive(rocket::FromForm)]
 pub(crate) struct OtpRequestData {
@@ -6,7 +6,7 @@ pub(crate) struct OtpRequestData {
 }
 
 #[rocket::post("/otp", data = "<data>")]
-pub(crate) fn otp(data: rocket::form::Form<OtpRequestData>) -> Result<(), Error> {
+pub(crate) fn otp(data: rocket::form::Form<OtpRequestData>) -> Result<(), CRRError> {
     let metadata = Metadata::open()?;
 
     let otp = nanoid::nanoid!();

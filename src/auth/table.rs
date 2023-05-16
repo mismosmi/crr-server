@@ -1,4 +1,4 @@
-use crate::{error::Error, metadata::Metadata};
+use crate::{error::CRRError, metadata::Metadata};
 use rusqlite::named_params;
 
 impl super::User {
@@ -6,7 +6,7 @@ impl super::User {
         &self,
         meta: &Metadata,
         database_name: &str,
-    ) -> Result<Vec<String>, Error> {
+    ) -> Result<Vec<String>, CRRError> {
         self.tables_with_permission(meta, database_name, "pread")
     }
 
@@ -47,7 +47,7 @@ impl super::User {
         meta: &Metadata,
         database_name: &str,
         permission: &str,
-    ) -> Result<Vec<String>, Error> {
+    ) -> Result<Vec<String>, CRRError> {
         let query = format!(
             "
                 SELECT permissions.table_name

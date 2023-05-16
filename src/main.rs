@@ -8,7 +8,7 @@ mod serde_base64;
 mod tests;
 
 use database::changes::change_manager::ChangeManager;
-use error::Error;
+use error::CRRError;
 use metadata::Metadata;
 
 #[rocket::get("/")]
@@ -17,7 +17,7 @@ fn index() -> &'static str {
 }
 
 #[rocket::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), CRRError> {
     dotenv::dotenv()?;
 
     let meta = Metadata::open()?;

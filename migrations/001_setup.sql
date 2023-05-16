@@ -46,5 +46,3 @@ CREATE TABLE IF NOT EXISTS migrations (
     version INTEGER NOT NULL,
     statements TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS metadata_migrations (version INTEGER PRIMARY KEY);

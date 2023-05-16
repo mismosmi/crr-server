@@ -2,7 +2,7 @@ use rocket::tokio;
 
 use crate::{
     database::{migrations::Migration, ChangeMessage, Changeset, Database},
-    error::Error,
+    error::CRRError,
     metadata::Metadata,
 };
 
@@ -37,7 +37,7 @@ impl ChangeManager {
         }
     }
 
-    pub(crate) async fn subscribe(&self, database: Database) -> Result<Subscription, Error> {
+    pub(crate) async fn subscribe(&self, database: Database) -> Result<Subscription, CRRError> {
         if let Some((changes_sender, update_sender)) =
             self.handles.read().await.get(database.name())
         {
@@ -54,7 +54,7 @@ impl ChangeManager {
         self.add_handle(database).await
     }
 
-    async fn add_handle(&self, database: Database) -> Result<Subscription, Error> {
+    async fn add_handle(&self, database: Database) -> Result<Subscription, CRRError> {
         let (changes_sender, changes_receiver) =
             tokio::sync::broadcast::channel::<ChangeMessage>(32);
         let (update_sender, update_receiver) = tokio::sync::mpsc::channel::<()>(1);
@@ -70,8 +70,8 @@ impl ChangeManager {
         async fn process_changes(
             mut db: super::Database,
             mut update_receiver: tokio::sync::mpsc::Receiver<()>,
-            changes_sender: tokio::sync::broadcast::Sender<Result<Changeset, Error>>,
-        ) -> Result<(), Error> {
+            changes_sender: tokio::sync::broadcast::Sender<Result<Changeset, CRRError>>,
+        ) -> Result<(), CRRError> {
             for changeset in db.all_changes() {
                 changes_sender.send(changeset)?;
             }

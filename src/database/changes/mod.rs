@@ -9,7 +9,7 @@ use rocket::{
 };
 use rusqlite::{named_params, params_from_iter, ToSql};
 
-use crate::{auth::User, error::Error, metadata::Metadata};
+use crate::{auth::User, error::CRRError, metadata::Metadata};
 
 use super::{Changeset, Database};
 
@@ -113,7 +113,10 @@ where
 }
 
 #[rocket::post("/<database>/changes", format = "json", data = "<changes>")]
-pub(crate) fn post_changes(database: String, changes: Json<Vec<Changeset>>) -> Result<(), Error> {
+pub(crate) fn post_changes(
+    database: String,
+    changes: Json<Vec<Changeset>>,
+) -> Result<(), CRRError> {
     let mut db = Database::open(database)?;
 
     db.apply_changes(changes.into_inner())?;
@@ -126,7 +129,7 @@ impl Database {
         &'d mut self,
         allowed_tables: &'t Vec<String>,
         site_id: &'s Vec<u8>,
-    ) -> Result<ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), Error> + 'd>, Error>
+    ) -> Result<ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + 'd>, CRRError>
     where
         's: 'd,
         't: 'd,
@@ -186,7 +189,7 @@ impl Database {
 
     fn all_changes<'d>(
         &'d mut self,
-    ) -> ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), Error> + 'd> {
+    ) -> ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + 'd> {
         ChangesIter::new(move || {
             let query = "
                 SELECT \"table\", pk, cid, val, col_version, db_version, site_id
@@ -223,7 +226,7 @@ impl Database {
         })
     }
 
-    fn apply_changes(&mut self, changes: Vec<Changeset>) -> Result<(), Error> {
+    fn apply_changes(&mut self, changes: Vec<Changeset>) -> Result<(), CRRError> {
         let query = "
             INSERT INTO crsql_changes (\"table\", pk, cid, val, col_version, db_version, site_id)
             VALUES (:table, :pk, :cid, :val, :col_version, :db_version, :site_id)
@@ -249,7 +252,7 @@ impl Database {
 
 struct ChangesIter<F>
 where
-    F: FnMut() -> Result<(Vec<Changeset>, bool), Error> + Send,
+    F: FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + Send,
 {
     load_page: std::sync::Mutex<F>,
     current_page: <Vec<Changeset> as IntoIterator>::IntoIter,
@@ -258,7 +261,7 @@ where
 
 impl<F> ChangesIter<F>
 where
-    F: FnMut() -> Result<(Vec<Changeset>, bool), Error> + Send,
+    F: FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + Send,
 {
     fn new(load_page: F) -> Self {
         Self {
@@ -271,9 +274,9 @@ where
 
 impl<F> Iterator for ChangesIter<F>
 where
-    F: FnMut() -> Result<(Vec<Changeset>, bool), Error> + Send,
+    F: FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + Send,
 {
-    type Item = Result<Changeset, Error>;
+    type Item = Result<Changeset, CRRError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(changeset) = self.current_page.next() {
@@ -284,7 +287,7 @@ where
             match self
                 .load_page
                 .lock()
-                .map_err(|_| Error::ServerError("Poisoned lock in ChangesIter".to_owned()))
+                .map_err(|_| CRRError::ServerError("Poisoned lock in ChangesIter".to_owned()))
                 .and_then(|mut lock| Ok(lock()?))
             {
                 Ok((page, has_next_page)) => {
@@ -307,7 +310,7 @@ mod tests {
         database::{
             changes::change_manager::ChangeManager, migrations::tests::setup_foo, Changeset, Value,
         },
-        error::Error,
+        error::CRRError,
         tests::TestEnv,
     };
     use rocket::tokio;
@@ -397,7 +400,7 @@ mod tests {
 
         let changes = db_a
             .all_changes()
-            .collect::<Result<Vec<Changeset>, Error>>()
+            .collect::<Result<Vec<Changeset>, CRRError>>()
             .expect("Failed to retrieve changes");
 
         let mut db_b = env_b.db();
