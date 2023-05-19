@@ -1,17 +1,19 @@
-use crate::{error::CRRError, metadata::Metadata};
+use axum::Json;
 
-#[derive(rocket::FromForm)]
+use crate::error::CRRError;
+
+use super::database::AuthDatabase;
+
 pub(crate) struct OtpRequestData {
     email: String,
 }
 
-#[rocket::post("/otp", data = "<data>")]
-pub(crate) fn otp(data: rocket::form::Form<OtpRequestData>) -> Result<(), CRRError> {
-    let metadata = Metadata::open()?;
+pub(crate) fn post_otp(data: Json<OtpRequestData>) -> Result<(), CRRError> {
+    let auth = AuthDatabase::open()?;
 
     let otp = nanoid::nanoid!();
 
-    let mut stmt = metadata.prepare(
+    let mut stmt = auth.prepare(
         "
         INSERT INTO users (email, otp)
         VALUES (:email, :otp)

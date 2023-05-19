@@ -39,10 +39,3 @@ CREATE TABLE IF NOT EXISTS tokens (
     expires TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
-
-CREATE TABLE IF NOT EXISTS migrations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    database_name TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    statements TEXT NOT NULL
-);

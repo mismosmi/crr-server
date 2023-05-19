@@ -1,13 +1,34 @@
-use crate::{error::CRRError, metadata::Metadata};
+use crate::error::CRRError;
 use rusqlite::named_params;
 
-impl super::User {
-    pub(crate) fn readable_tables(
-        &self,
-        meta: &Metadata,
-        database_name: &str,
-    ) -> Result<Vec<String>, CRRError> {
-        self.tables_with_permission(meta, database_name, "pread")
+use super::database::AuthDatabase;
+
+pub(crate) struct User<'db> {
+    id: i64,
+    db: &'db AuthDatabase,
+}
+
+impl<'db> User<'db> {
+    pub(crate) fn owns_database(&self, database: &str) -> Result<bool, CRRError> {
+        let mut query = self.db.prepare(
+            "
+            SELECT TRUE 
+            FROM database_owners
+            WHERE user_id = :user_id
+            AND database_name = :database_name
+            ",
+        )?;
+
+        let granted = query.exists(named_params! {
+            ":user_id": self.id,
+            ":database_name": database
+        })?;
+
+        Ok(granted)
+    }
+
+    pub(crate) fn readable_tables(&self, database_name: &str) -> Result<Vec<String>, CRRError> {
+        self.tables_with_permission(database_name, "pread")
     }
 
     //fn has_permission_for_table(
@@ -44,7 +65,6 @@ impl super::User {
 
     fn tables_with_permission(
         &self,
-        meta: &Metadata,
         database_name: &str,
         permission: &str,
     ) -> Result<Vec<String>, CRRError> {
@@ -60,7 +80,7 @@ impl super::User {
             permission
         );
 
-        let mut stmt = meta.prepare(&query)?;
+        let mut stmt = self.db.prepare(&query)?;
         let mut rows = stmt.query(named_params! {
             ":user_id": self.id,
             ":database_name": database_name

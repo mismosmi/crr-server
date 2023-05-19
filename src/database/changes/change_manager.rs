@@ -1,7 +1,5 @@
-use rocket::tokio;
-
 use crate::{
-    database::{migrations::Migration, ChangeMessage, Changeset, Database},
+    database::{migrate::Migration, ChangeMessage, Changeset, Database},
     error::CRRError,
     metadata::Metadata,
 };

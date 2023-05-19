@@ -13,12 +13,8 @@ pub(crate) fn send_email(receiver: &str, subject: String, message: String) -> Re
 
     let sender = std::env::var("SMTP_SENDER")?;
     let email = lettre::Message::builder()
-        .from(sender.parse().map_err(|_err| {
-            CRRError::SmtpError(format!("Failed to parse sender: \"{}\"", sender))
-        })?)
-        .to(receiver.parse().map_err(|_err| {
-            CRRError::SmtpError(format!("Failed to parse receiver: \"{}\"", receiver))
-        })?)
+        .from(sender.parse()?)
+        .to(receiver.parse()?)
         .subject(subject)
         .body(message)?;
 

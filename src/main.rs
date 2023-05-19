@@ -2,42 +2,32 @@ mod auth;
 mod database;
 pub(crate) mod error;
 pub(crate) mod mail;
-mod metadata;
 mod serde_base64;
 #[cfg(test)]
 mod tests;
 
-use database::changes::change_manager::ChangeManager;
-use error::CRRError;
-use metadata::Metadata;
+use auth::database::AuthDatabase;
+use axum::{Router, Server};
 
-#[rocket::get("/")]
-fn index() -> &'static str {
-    "Hello, world!"
-}
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt::init();
 
-#[rocket::main]
-async fn main() -> Result<(), CRRError> {
-    dotenv::dotenv()?;
+    dotenv::dotenv().expect("Failed to read environment");
 
-    let meta = Metadata::open()?;
+    let auth = AuthDatabase::open().expect("Failed to open Auth Database");
 
-    meta.apply_migrations()?;
+    auth.apply_migrations()
+        .expect("Failed to apply Auth Migrations");
 
-    let _rocket = rocket::build()
-        .manage(ChangeManager::new(meta))
-        .mount("/", rocket::routes![index])
-        .mount("/auth", rocket::routes![auth::otp::otp, auth::token::token])
-        .mount(
-            "/database",
-            rocket::routes![
-                database::migrations::post_migrations,
-                database::changes::stream_changes,
-                database::changes::post_changes
-            ],
-        )
-        .launch()
-        .await?;
+    let app = Router::new().nest("/auth", auth::router());
 
-    Ok(())
+    Server::bind(
+        &"0.0.0.0:3000"
+            .parse()
+            .expect("Failed to parse bind address"),
+    )
+    .serve(app.into_make_service())
+    .await
+    .expect("Failed to start server");
 }
