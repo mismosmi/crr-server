@@ -22,7 +22,7 @@ impl Database {
             "macos" => "darwin",
             "windows" => "windows",
             "linux" => "linux",
-            os => return Err(CRRError::ServerError(format!("Unsupported OS: {}", os))),
+            os => return Err(CRRError::UnsupportedOS(os.to_owned())),
         };
 
         let arch = std::env::consts::ARCH;

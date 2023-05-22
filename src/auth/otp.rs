@@ -1,14 +1,16 @@
-use axum::Json;
+use axum::extract::Json;
+use serde::Deserialize;
 
 use crate::error::CRRError;
 
 use super::database::AuthDatabase;
 
+#[derive(Deserialize)]
 pub(crate) struct OtpRequestData {
     email: String,
 }
 
-pub(crate) fn post_otp(data: Json<OtpRequestData>) -> Result<(), CRRError> {
+pub(crate) async fn post_otp(Json(data): Json<OtpRequestData>) -> Result<(), CRRError> {
     let auth = AuthDatabase::open()?;
 
     let otp = nanoid::nanoid!();

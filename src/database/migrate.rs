@@ -1,5 +1,5 @@
 use crate::{auth::database::AuthDatabase, error::CRRError};
-use axum::{extract::Path, Json};
+use axum::extract::{Json, Path};
 use axum_extra::extract::CookieJar;
 use serde::Deserialize;
 
@@ -10,10 +10,10 @@ struct MigratePostData {
     queries: Vec<String>,
 }
 
-pub(crate) fn post_migrate(
-    db_name: Path<String>,
-    data: Json<MigratePostData>,
+pub(crate) async fn post_migrate(
+    Path(db_name): Path<String>,
     cookies: CookieJar,
+    Json(data): Json<MigratePostData>,
 ) -> Result<(), CRRError> {
     AuthDatabase::open_readonly()?.authorize_owned_access(&cookies, &db_name)?;
 
@@ -47,7 +47,8 @@ pub(crate) mod tests {
 
     pub(crate) fn setup_foo(env: &TestEnv) {
         let mut migrations = vec![
-            "CREATE TABLE foo (id INTEGER PRIMARY KEY, bar TEXT); SELECT crsql_as_crr('foo');",
+            "CREATE TABLE foo (id INTEGER PRIMARY KEY, bar TEXT); SELECT crsql_as_crr('foo');"
+                .to_string(),
         ];
 
         env.db()

@@ -1,11 +1,11 @@
-use std::{collections::HashMap, fs};
+use std::fs;
 
 use axum_extra::extract::CookieJar;
 use rusqlite::{named_params, OpenFlags};
 
 use crate::error::CRRError;
 
-use super::{permissions::TablePermissions, DatabasePermissions};
+use super::DatabasePermissions;
 
 pub(crate) struct AuthDatabase {
     conn: rusqlite::Connection,
@@ -54,67 +54,96 @@ impl AuthDatabase {
     fn check_ownership(&self, user_id: i64, db_name: &str) -> Result<bool, CRRError> {
         let mut query = self.prepare(
             "
-            SELECT TRUE 
-            FROM database_owners
-            WHERE user_id = :user_id
-            AND database_name = :database_name
+                SELECT TRUE 
+                FROM permissions
+                WHERE role_id IN (SELECT role_id FROM user_roles WHERE user_id = :user_id)
+                AND database_name = :database_name
+                AND pfull = TRUE
             ",
         )?;
 
         let granted = query.exists(named_params! {
-            ":user_id": self.id,
+            ":user_id": user_id,
             ":database_name": db_name
         })?;
 
         Ok(granted)
     }
 
-    fn get_table_permissions(
+    fn get_permissions_for_user(
         &self,
         user_id: i64,
         database_name: &str,
-    ) -> Result<HashMap<String, TablePermissions>, CRRError> {
+    ) -> Result<DatabasePermissions, CRRError> {
         let mut stmt = self.prepare(
             "
                 SELECT 
-                    table_permissions.table_name,
-                    table_permissions.pread,
-                    table_permissions.pinsert,
-                    table_permissions.pupdate,
-                    table_permissions.pdelete
-                FROM user_roles
-                LEFT JOIN table_permissions
-                ON user_roles.role_id = table_permissions.role_id
-                WHERE table_permissions.database_name = :database_name
-                AND user_roles.user_id = :user_id
+                    table_name,
+                    pread,
+                    pinsert,
+                    pupdate,
+                    pdelete,
+                    pfull
+                FROM permissions
+                WHERE role_id IN (SELECT role_id FROM user_roles WHERE user_id = :user_id)
+                AND database_name = :database_name
             ",
         )?;
 
         let mut rows = stmt.query(named_params! {
-            ":user_id": self.id,
+            ":user_id": user_id,
             ":database_name": database_name
         })?;
 
-        let mut table_permissions: HashMap<String, TablePermissions> = HashMap::new();
+        let mut permissions = DatabasePermissions::default();
 
         while let Ok(Some(row)) = rows.next() {
-            let table_name = row.get(0)?;
-            let pread = row.get(1)?;
-            let pinsert = row.get(2)?;
-            let pupdate = row.get(3)?;
-            let pdelete = row.get(4)?;
+            let table_name: Option<String> = row.get(0)?;
+            let pread: bool = row.get(1)?;
+            let pinsert: bool = row.get(2)?;
+            let pupdate: bool = row.get(3)?;
+            let pdelete: bool = row.get(4)?;
+            let pfull: bool = row.get(5)?;
 
-            let permissions = table_permissions
-                .entry(table_name)
-                .or_insert(TablePermissions::default());
-
-            permissions.merge_read(pread);
-            permissions.merge_insert(pinsert);
-            permissions.merge_update(pupdate);
-            permissions.merge_delete(pdelete);
+            match table_name {
+                Some(table_name) => {
+                    if pread {
+                        permissions.grant_table_read(table_name);
+                    }
+                    if pinsert {
+                        permissions.grant_table_insert(table_name);
+                    }
+                    if pupdate {
+                        permissions.grant_table_update(table_name);
+                    }
+                    if pdelete {
+                        permissions.grant_table_delete(table_name);
+                    }
+                    if pfull {
+                        permissions.grant_table_full(table_name);
+                    }
+                }
+                None => {
+                    if pread {
+                        permissions.grant_read();
+                    }
+                    if pinsert {
+                        permissions.grant_insert();
+                    }
+                    if pupdate {
+                        permissions.grant_update();
+                    }
+                    if pdelete {
+                        permissions.grant_delete();
+                    }
+                    if pfull {
+                        permissions.grant_full();
+                    }
+                }
+            }
         }
 
-        Ok(table_permissions)
+        Ok(permissions)
     }
 
     pub(crate) fn authorize_owned_access(
@@ -145,16 +174,54 @@ impl AuthDatabase {
             return Ok(DatabasePermissions::Full);
         }
 
-        let table_permissions = self.get_table_permissions(user_id, db_name)?;
+        let permissions = self.get_permissions_for_user(user_id, db_name)?;
 
-        if table_permissions.is_empty() {
+        if permissions.is_empty() {
             return Err(CRRError::unauthorized(format!(
                 "User has no access to database {}",
                 db_name
             )));
         }
 
-        Ok(DatabasePermissions::Partial(table_permissions))
+        Ok(permissions)
+    }
+
+    fn update_permissions(
+        &self,
+        role_id: i64,
+        database_name: &str,
+        permissions: &DatabasePermissions,
+    ) -> Result<(), CRRError> {
+        let query = "
+            INSERT INTO permissions
+                (role_id, database_name, table_name, pread, pinsert, pupdate, pdelete, pfull) 
+            VALUES 
+                (:role_id, :database_name, :table_name, :pread, :pinsert, :pupdate, :pdelete, :pfull) 
+            ON CONFLICT (role_id, database_name, table_name)
+            DO UPDATE SET
+                pread = excluded.pread,
+                pinsert = excluded.pinsert,
+                pupdate = excluded.pupdate,
+                pdelete = excluded.pdelete,
+                pfull = excluded.pfull;
+        ";
+
+        let mut stmt = self.prepare(query)?;
+
+        permissions.apply(|table_name, permissions| {
+            stmt.execute(named_params! {
+                ":role_id": role_id,
+                ":database_name": database_name,
+                ":table_name": table_name,
+                ":pread": permissions.read(),
+                ":pinsert": permissions.insert(),
+                ":pupdate": permissions.update(),
+                ":pdelete": permissions.delete(),
+                ":pfull": permissions.full()
+            })?;
+
+            Ok(())
+        })
     }
 }
 
@@ -170,4 +237,10 @@ impl std::ops::DerefMut for AuthDatabase {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.conn
     }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn do_nothing() {}
 }

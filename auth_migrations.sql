@@ -14,24 +14,20 @@ CREATE TABLE IF NOT EXISTS user_roles (
     PRIMARY KEY (user_id, role_id)
 );
 
-CREATE TABLE IF NOT EXISTS database_owners (
-    user_id INTEGER,
-    database_name TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users (id),
-    PRIMARY KEY (user_id, database_name)
-);
-
-CREATE TABLE IF NOT EXISTS table_permissions (
+CREATE TABLE IF NOT EXISTS permissions (
     role_id INTEGER,
     database_name TEXT NOT NULL,
-    table_name TEXT NOT NULL,
-    pread BOOLEAN NOT NULL,
-    pupdate BOOLEAN NOT NULL,
-    pinsert BOOLEAN NOT NULL,
-    pdelete BOOLEAN NOT NULL,
+    table_name TEXT,
+    pread BOOLEAN NOT NULL DEFAULT FALSE,
+    pinsert BOOLEAN NOT NULL DEFAULT FALSE,
+    pupdate BOOLEAN NOT NULL DEFAULT FALSE,
+    pdelete BOOLEAN NOT NULL DEFAULT FALSE,
+    pfull BOOLEAN NOT NULL DEFAULT FALSE,
     FOREIGN KEY (role_id) REFERENCES roles (id),
     PRIMARY KEY (role_id, database_name, table_name)
 );
+
+CREATE INDEX IF NOT EXISTS permissions_by_role_and_db ON permissions (role_id, database_name);
 
 CREATE TABLE IF NOT EXISTS tokens (
     user_id INTEGER,

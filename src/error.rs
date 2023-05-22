@@ -31,6 +31,14 @@ pub(crate) enum CRRError {
     Unauthorized(String),
     #[error("Validation Error: {0}")]
     ValidationError(String),
+    #[error("Type Error: Array-typed parameters are currently not supported")]
+    ParameterArrayTypeError,
+    #[error("Type Error: Object-typed parameters are currently not supported")]
+    ParameterObjectTypeError,
+    #[error("Type Error: Failed to deserialize number")]
+    ParameterNumberTypeError,
+    #[error("Unsupported OS: {0}")]
+    UnsupportedOS(String),
 }
 
 impl IntoResponse for CRRError {
