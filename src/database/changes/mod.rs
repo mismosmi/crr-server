@@ -1,4 +1,5 @@
 pub(crate) mod change_manager;
+mod changeset;
 
 use base64::{engine::general_purpose::STANDARD as base64, Engine};
 use rocket::{
@@ -308,7 +309,7 @@ mod tests {
 
     use crate::{
         database::{
-            changes::change_manager::ChangeManager, migrations::tests::setup_foo, Changeset, Value,
+            changes::change_manager::ChangeManager, migrate::tests::setup_foo, Changeset, Value,
         },
         error::CRRError,
         tests::TestEnv,

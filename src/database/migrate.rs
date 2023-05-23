@@ -6,7 +6,7 @@ use serde::Deserialize;
 use super::Database;
 
 #[derive(Deserialize)]
-struct MigratePostData {
+pub(crate) struct MigratePostData {
     queries: Vec<String>,
 }
 
@@ -46,7 +46,7 @@ pub(crate) mod tests {
     use crate::tests::TestEnv;
 
     pub(crate) fn setup_foo(env: &TestEnv) {
-        let mut migrations = vec![
+        let migrations = vec![
             "CREATE TABLE foo (id INTEGER PRIMARY KEY, bar TEXT); SELECT crsql_as_crr('foo');"
                 .to_string(),
         ];

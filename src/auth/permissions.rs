@@ -2,35 +2,22 @@ use std::collections::HashMap;
 
 use crate::error::CRRError;
 
-#[derive(Default, Debug, Clone)]
-struct PartialPermissions {
-    read: bool,
-    insert: bool,
-    update: bool,
-    delete: bool,
+#[derive(Default, Debug, Clone, Copy)]
+pub(crate) struct PartialPermissions {
+    pub(crate) read: bool,
+    pub(crate) insert: bool,
+    pub(crate) update: bool,
+    pub(crate) delete: bool,
 }
 
 impl PartialPermissions {
-    fn grant_read(&mut self) {
-        self.read = true;
-    }
-    fn grant_insert(&mut self) {
-        self.insert = true;
-    }
-    fn grant_update(&mut self) {
-        self.update = true;
-    }
-    fn grant_delete(&mut self) {
-        self.delete = true;
-    }
-
     fn is_empty(&self) -> bool {
         return !self.read && !self.insert && !self.update && !self.delete;
     }
 }
 
 #[derive(Debug, Clone)]
-enum ObjectPermissions {
+pub(crate) enum ObjectPermissions {
     Full,
     Partial(PartialPermissions),
 }
@@ -42,32 +29,14 @@ impl Default for ObjectPermissions {
 }
 
 impl ObjectPermissions {
-    fn grant_full(&mut self) {
+    pub(crate) fn set_full(&mut self) {
         *self = Self::Full;
     }
 
-    fn grant_read(&mut self) {
+    pub(crate) fn set(&mut self, permissions: PartialPermissions) {
         match self {
             Self::Full => (),
-            Self::Partial(p) => p.grant_read(),
-        }
-    }
-    fn grant_insert(&mut self) {
-        match self {
-            Self::Full => (),
-            Self::Partial(p) => p.grant_insert(),
-        }
-    }
-    fn grant_update(&mut self) {
-        match self {
-            Self::Full => (),
-            Self::Partial(p) => p.grant_update(),
-        }
-    }
-    fn grant_delete(&mut self) {
-        match self {
-            Self::Full => (),
-            Self::Partial(p) => p.grant_delete(),
+            Self::Partial(p) => *p = permissions,
         }
     }
 
@@ -121,41 +90,18 @@ impl Default for DatabasePermissions {
 }
 
 impl DatabasePermissions {
-    pub(crate) fn grant_full(&mut self) {
+    pub(crate) fn set_full(&mut self) {
         *self = Self::Full;
     }
-    pub(crate) fn grant_read(&mut self) {
+    pub(crate) fn set(&mut self, permissions: PartialPermissions) {
         match self {
             Self::Full => (),
             Self::Partial { database, .. } => {
-                database.grant_read();
+                *database = permissions;
             }
         }
     }
-    pub(crate) fn grant_insert(&mut self) {
-        match self {
-            Self::Full => (),
-            Self::Partial { database, .. } => {
-                database.grant_insert();
-            }
-        }
-    }
-    pub(crate) fn grant_update(&mut self) {
-        match self {
-            Self::Full => (),
-            Self::Partial { database, .. } => {
-                database.grant_update();
-            }
-        }
-    }
-    pub(crate) fn grant_delete(&mut self) {
-        match self {
-            Self::Full => (),
-            Self::Partial { database, .. } => {
-                database.grant_delete();
-            }
-        }
-    }
+
     fn with_table<F>(&mut self, table_name: String, f: F)
     where
         F: FnOnce(&mut ObjectPermissions),
@@ -172,20 +118,11 @@ impl DatabasePermissions {
         }
     }
 
-    pub(crate) fn grant_table_full(&mut self, table_name: String) {
-        self.with_table(table_name, |t| t.grant_full());
+    pub(crate) fn set_table_full(&mut self, table_name: String) {
+        self.with_table(table_name, |t| t.set_full());
     }
-    pub(crate) fn grant_table_read(&mut self, table_name: String) {
-        self.with_table(table_name, |t| t.grant_read());
-    }
-    pub(crate) fn grant_table_insert(&mut self, table_name: String) {
-        self.with_table(table_name, |t| t.grant_insert());
-    }
-    pub(crate) fn grant_table_update(&mut self, table_name: String) {
-        self.with_table(table_name, |t| t.grant_update());
-    }
-    pub(crate) fn grant_table_delete(&mut self, table_name: String) {
-        self.with_table(table_name, |t| t.grant_delete());
+    pub(crate) fn set_table(&mut self, table_name: String, permissions: PartialPermissions) {
+        self.with_table(table_name, |t| t.set(permissions));
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -197,9 +134,9 @@ impl DatabasePermissions {
         }
     }
 
-    pub(crate) fn apply<F>(&self, f: F) -> Result<(), CRRError>
+    pub(crate) fn apply<F>(&self, mut f: F) -> Result<(), CRRError>
     where
-        F: Fn(Option<&str>, ObjectPermissions) -> Result<(), CRRError>,
+        F: FnMut(Option<&str>, ObjectPermissions) -> Result<(), CRRError>,
     {
         match self {
             Self::Full => f(None, ObjectPermissions::Full),

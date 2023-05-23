@@ -39,6 +39,8 @@ pub(crate) enum CRRError {
     ParameterNumberTypeError,
     #[error("Unsupported OS: {0}")]
     UnsupportedOS(String),
+    #[error("Unable to serialize Binary Data (Blob)")]
+    BlobSerialization,
 }
 
 impl IntoResponse for CRRError {

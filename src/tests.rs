@@ -1,4 +1,4 @@
-use crate::{database::Database, metadata::Metadata};
+use crate::{auth::database::AuthDatabase, database::Database};
 
 pub(crate) struct TestEnv {
     folder: std::path::PathBuf,
@@ -12,9 +12,9 @@ impl TestEnv {
 
         let _err = std::fs::create_dir_all(&this.folder);
 
-        let meta = Metadata::open_for_test(&this);
+        let auth = AuthDatabase::open_for_test(&this);
 
-        meta.apply_migrations()
+        auth.apply_migrations()
             .expect("Failed to apply metadata migrations");
 
         this
@@ -24,8 +24,8 @@ impl TestEnv {
         &self.folder
     }
 
-    pub(crate) fn meta(&self) -> Metadata {
-        Metadata::open_for_test(self)
+    pub(crate) fn auth(&self) -> AuthDatabase {
+        AuthDatabase::open_for_test(self)
     }
 
     pub(crate) fn db(&self) -> Database {

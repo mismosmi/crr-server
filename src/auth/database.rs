@@ -5,7 +5,7 @@ use rusqlite::{named_params, OpenFlags};
 
 use crate::error::CRRError;
 
-use super::DatabasePermissions;
+use super::{permissions::PartialPermissions, DatabasePermissions};
 
 pub(crate) struct AuthDatabase {
     conn: rusqlite::Connection,
@@ -99,45 +99,38 @@ impl AuthDatabase {
 
         while let Ok(Some(row)) = rows.next() {
             let table_name: Option<String> = row.get(0)?;
-            let pread: bool = row.get(1)?;
-            let pinsert: bool = row.get(2)?;
-            let pupdate: bool = row.get(3)?;
-            let pdelete: bool = row.get(4)?;
-            let pfull: bool = row.get(5)?;
+            let read: bool = row.get(1)?;
+            let insert: bool = row.get(2)?;
+            let update: bool = row.get(3)?;
+            let delete: bool = row.get(4)?;
+            let full: bool = row.get(5)?;
 
             match table_name {
                 Some(table_name) => {
-                    if pread {
-                        permissions.grant_table_read(table_name);
-                    }
-                    if pinsert {
-                        permissions.grant_table_insert(table_name);
-                    }
-                    if pupdate {
-                        permissions.grant_table_update(table_name);
-                    }
-                    if pdelete {
-                        permissions.grant_table_delete(table_name);
-                    }
-                    if pfull {
-                        permissions.grant_table_full(table_name);
+                    if full {
+                        permissions.set_table_full(table_name);
+                    } else {
+                        permissions.set_table(
+                            table_name,
+                            PartialPermissions {
+                                read,
+                                insert,
+                                update,
+                                delete,
+                            },
+                        )
                     }
                 }
                 None => {
-                    if pread {
-                        permissions.grant_read();
-                    }
-                    if pinsert {
-                        permissions.grant_insert();
-                    }
-                    if pupdate {
-                        permissions.grant_update();
-                    }
-                    if pdelete {
-                        permissions.grant_delete();
-                    }
-                    if pfull {
-                        permissions.grant_full();
+                    if full {
+                        permissions.set_full();
+                    } else {
+                        permissions.set(PartialPermissions {
+                            read,
+                            insert,
+                            update,
+                            delete,
+                        })
                     }
                 }
             }

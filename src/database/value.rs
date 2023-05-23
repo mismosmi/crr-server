@@ -3,16 +3,17 @@ use rusqlite::{
     ToSql,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
-use crate::error::CRRError;
+use crate::serde_base64;
 
-#[derive(Clone, Serialize, Debug, PartialEq, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(untagged)]
 pub(crate) enum Value {
     Null,
     Integer(i64),
     Real(f64),
     Text(String),
+    #[serde(with = "serde_base64")]
     Blob(Vec<u8>),
 }
 
@@ -56,31 +57,6 @@ impl ToSql for Value {
             Self::Real(value) => Ok(ToSqlOutput::Borrowed(ValueRef::Real(value.clone()))),
             Self::Null => Ok(ToSqlOutput::Borrowed(ValueRef::Null)),
             Self::Text(value) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(value.as_bytes()))),
-        }
-    }
-}
-
-impl TryFrom<serde_json::Value> for Value {
-    type Error = CRRError;
-
-    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        match value {
-            serde_json::Value::Null => Ok(Self::Null),
-            serde_json::Value::Array(_) => Err(CRRError::ParameterArrayTypeError),
-            serde_json::Value::Object(_) => Err(CRRError::ParameterObjectTypeError),
-            serde_json::Value::Bool(value) => Ok(Self::Integer(if value { 1 } else { 0 })),
-            serde_json::Value::Number(value) => {
-                if let Some(value) = value.as_i64() {
-                    return Ok(Self::Integer(value));
-                }
-
-                if let Some(value) = value.as_f64() {
-                    return Ok(Self::Real(value));
-                }
-
-                Err(CRRError::ParameterNumberTypeError)
-            }
-            serde_json::Value::String(value) => Ok(Self::Text(value)),
         }
     }
 }

@@ -20,8 +20,11 @@ async fn main() {
     auth.apply_migrations()
         .expect("Failed to apply Auth Migrations");
 
-    let app = Router::new().nest("/auth", auth::router());
+    let app = Router::new()
+        .nest("/auth", auth::router())
+        .nest("/db", database::router());
 
+    tracing::info!("Starting server...");
     Server::bind(
         &"0.0.0.0:3000"
             .parse()
