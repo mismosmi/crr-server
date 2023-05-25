@@ -1,3 +1,5 @@
+use std::sync::PoisonError;
+
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -21,8 +23,6 @@ pub(crate) enum CRRError {
     InvalidAddress(#[from] AddressError),
     #[error("Environment Error: {0}")]
     EnvVarError(#[from] std::env::VarError),
-    //#[error("Message Passing Error: {0}")]
-    //BroadcastSendError(#[from] tokio::sync::broadcast::error::SendError<ChangeMessage>),
     #[error("Message Passing Error: {0}")]
     BroadcastRecvError(#[from] tokio::sync::broadcast::error::RecvError),
     #[error("IO Error: {0}")]
@@ -41,6 +41,10 @@ pub(crate) enum CRRError {
     UnsupportedOS(String),
     #[error("Unable to serialize Binary Data (Blob)")]
     BlobSerialization,
+    #[error("Poisoned Lock Error: {0}")]
+    PoisonedLockError(#[source] Box<dyn std::error::Error>),
+    #[error("Message Passing Error: {0}")]
+    SignalSendError(#[from] tokio::sync::mpsc::error::SendError<crate::database::changes::Signal>),
 }
 
 impl IntoResponse for CRRError {

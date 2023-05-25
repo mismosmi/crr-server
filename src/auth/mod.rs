@@ -8,7 +8,7 @@ mod permissions;
 pub(crate) mod token;
 pub(crate) mod user;
 
-pub(crate) use permissions::DatabasePermissions;
+pub(crate) use permissions::{AllowedTables, DatabasePermissions};
 
 pub(crate) const COOKIE_NAME: &'static str = "CRR_TOKEN";
 

@@ -1,9 +1,13 @@
-use crate::{auth::database::AuthDatabase, error::CRRError};
-use axum::extract::{Json, Path};
+use crate::{
+    auth::{database::AuthDatabase, DatabasePermissions},
+    error::CRRError,
+};
+use axum::extract::{Json, Path, State};
 use axum_extra::extract::CookieJar;
+use regex::Regex;
 use serde::Deserialize;
 
-use super::Database;
+use super::{changes::ChangeManager, Database};
 
 #[derive(Deserialize)]
 pub(crate) struct MigratePostData {
@@ -13,11 +17,14 @@ pub(crate) struct MigratePostData {
 pub(crate) async fn post_migrate(
     Path(db_name): Path<String>,
     cookies: CookieJar,
+    State(change_manager): State<ChangeManager>,
     Json(data): Json<MigratePostData>,
 ) -> Result<(), CRRError> {
-    AuthDatabase::open_readonly()?.authorize_owned_access(&cookies, &db_name)?;
+    let permissions = AuthDatabase::open_readonly()?.get_permissions(&cookies, &db_name)?;
 
-    let mut db = Database::open(db_name.to_owned())?;
+    change_manager.kill_connection(&db_name).await;
+
+    let mut db = Database::open(db_name, permissions)?;
 
     db.apply_migrations(&data.queries)?;
 
@@ -26,6 +33,13 @@ pub(crate) async fn post_migrate(
 
 impl Database {
     fn apply_migrations(&mut self, migrations: &Vec<String>) -> Result<(), CRRError> {
+        if !self.permissions().full() {
+            return Err(CRRError::Unauthorized(
+                "User must be authorized with full access to the database to apply migrations"
+                    .to_owned(),
+            ));
+        }
+
         for migration in migrations {
             self.apply_migration(migration)?;
         }
@@ -35,6 +49,7 @@ impl Database {
     fn apply_migration(&mut self, sql: &str) -> Result<(), CRRError> {
         tracing::info!("Database \"{}\": Applying migration", self.name());
 
+        // TODO auto-apply crsqlite stuff
         self.execute_batch(sql)?;
 
         Ok(())

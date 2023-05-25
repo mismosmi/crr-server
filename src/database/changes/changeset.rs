@@ -1,15 +1,13 @@
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 
-use crate::error::CRRError;
-
-use super::Value;
+use crate::{database::Value, error::CRRError};
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
 pub(crate) struct Changeset {
     table: String,
     pk: Value,
-    cid: String,
+    cid: Option<String>,
     val: Value,
     col_version: i64,
     db_version: i64,
@@ -18,13 +16,41 @@ pub(crate) struct Changeset {
 }
 
 impl Changeset {
-    fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         self.table.len()
             + self.pk.size()
-            + self.cid.len()
+            + self.cid.map(|cid| cid.len()).unwrap_or_default()
             + self.val.size()
             + 16
             + self.site_id.len()
+    }
+
+    pub(crate) fn table(&self) -> &str {
+        &self.table
+    }
+
+    pub(crate) fn pk(&self) -> &Value {
+        &self.pk
+    }
+
+    pub(crate) fn cid(&self) -> Option<&str> {
+        self.cid.as_ref().map(String::as_str)
+    }
+
+    pub(crate) fn val(&self) -> &Value {
+        &self.val
+    }
+
+    pub(crate) fn col_version(&self) -> i64 {
+        self.col_version
+    }
+
+    pub(crate) fn db_version(&self) -> i64 {
+        self.db_version
+    }
+
+    pub(crate) fn site_id(&self) -> &Vec<u8> {
+        &self.site_id
     }
 }
 

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use futures::stream::All;
+
 use crate::error::CRRError;
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -44,6 +46,12 @@ impl ObjectPermissions {
         match self {
             Self::Full => true,
             _ => false,
+        }
+    }
+    pub(crate) fn partial(&self) -> bool {
+        match self {
+            Self::Full => true,
+            Self::Partial(p) => !p.is_empty(),
         }
     }
     pub(crate) fn read(&self) -> bool {
@@ -158,11 +166,27 @@ impl DatabasePermissions {
             _ => false,
         }
     }
+    pub(crate) fn partial(&self) -> bool {
+        match self {
+            Self::Full => true,
+            Self::Partial { database, tables } => {
+                !database.is_empty() || tables.values().any(|table| table.partial())
+            }
+        }
+    }
 
     pub(crate) fn read(&self) -> bool {
         match self {
             Self::Full => true,
             Self::Partial { database, .. } => database.read,
+        }
+    }
+    pub(crate) fn partial_read(&self) -> bool {
+        match self {
+            Self::Full => true,
+            Self::Partial { database, tables } => {
+                database.read || tables.values().any(|table| table.read())
+            }
         }
     }
     pub(crate) fn insert(&self) -> bool {
@@ -221,6 +245,38 @@ impl DatabasePermissions {
             Self::Partial { database, tables } => {
                 database.delete || tables.get(table_name).map(|p| p.delete()).unwrap_or(false)
             }
+        }
+    }
+
+    pub(crate) fn readable_tables(&self) -> AllowedTables {
+        match self {
+            Self::Full => AllowedTables::All,
+            Self::Partial { database, tables } => {
+                if database.read {
+                    AllowedTables::All
+                } else {
+                    AllowedTables::Some(
+                        tables
+                            .keys()
+                            .map(|table_name| table_name.to_owned())
+                            .collect(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+pub(crate) enum AllowedTables {
+    All,
+    Some(Vec<String>),
+}
+
+impl AllowedTables {
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::All => false,
+            Self::Some(tables) => tables.is_empty(),
         }
     }
 }

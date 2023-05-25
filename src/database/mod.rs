@@ -1,3 +1,4 @@
+pub(crate) mod changes;
 mod database;
 mod migrate;
 mod run;

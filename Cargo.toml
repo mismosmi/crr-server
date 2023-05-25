@@ -10,8 +10,10 @@ axum = "0.6.18"
 axum-extra = { version = "0.7.4", features = ["cookie"] }
 base64 = "0.21.0"
 dotenv = "0.15.0"
+futures = "0.3.28"
 lettre = "0.10.3"
 nanoid = "0.4.0"
+regex = "1.8.2"
 rusqlite = { version = "0.28.0", features = ["bundled", "load_extension", "hooks"]}
 serde = { version = "1.0.163", features = ["derive"] }
 serde_json = "1.0.96"

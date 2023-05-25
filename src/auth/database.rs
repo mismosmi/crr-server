@@ -5,7 +5,10 @@ use rusqlite::{named_params, OpenFlags};
 
 use crate::error::CRRError;
 
-use super::{permissions::PartialPermissions, DatabasePermissions};
+use super::{
+    permissions::{self, PartialPermissions},
+    DatabasePermissions,
+};
 
 pub(crate) struct AuthDatabase {
     conn: rusqlite::Connection,
@@ -49,25 +52,6 @@ impl AuthDatabase {
             }, |row| row.get(0))?;
 
         Ok(id)
-    }
-
-    fn check_ownership(&self, user_id: i64, db_name: &str) -> Result<bool, CRRError> {
-        let mut query = self.prepare(
-            "
-                SELECT TRUE 
-                FROM permissions
-                WHERE role_id IN (SELECT role_id FROM user_roles WHERE user_id = :user_id)
-                AND database_name = :database_name
-                AND pfull = TRUE
-            ",
-        )?;
-
-        let granted = query.exists(named_params! {
-            ":user_id": user_id,
-            ":database_name": db_name
-        })?;
-
-        Ok(granted)
     }
 
     fn get_permissions_for_user(
@@ -124,6 +108,7 @@ impl AuthDatabase {
                 None => {
                     if full {
                         permissions.set_full();
+                        return Ok(permissions);
                     } else {
                         permissions.set(PartialPermissions {
                             read,
@@ -139,33 +124,12 @@ impl AuthDatabase {
         Ok(permissions)
     }
 
-    pub(crate) fn authorize_owned_access(
-        &self,
-        cookies: &CookieJar,
-        db_name: &str,
-    ) -> Result<(), CRRError> {
-        let user_id = self.authenticate_user(cookies)?;
-
-        if self.check_ownership(user_id, db_name)? {
-            return Ok(());
-        }
-
-        return Err(CRRError::unauthorized(format!(
-            "User does not own database \"{}\"",
-            db_name
-        )));
-    }
-
     pub(crate) fn get_permissions(
         &self,
         cookies: &CookieJar,
         db_name: &str,
     ) -> Result<DatabasePermissions, CRRError> {
         let user_id = self.authenticate_user(cookies)?;
-
-        if self.check_ownership(user_id, db_name)? {
-            return Ok(DatabasePermissions::Full);
-        }
 
         let permissions = self.get_permissions_for_user(user_id, db_name)?;
 
