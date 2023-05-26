@@ -12,6 +12,7 @@ use crate::{
     auth::database::AuthDatabase,
     database::Database,
     error::{CRRError, HttpError},
+    AppState,
 };
 
 use super::ChangeManager;
@@ -26,12 +27,14 @@ pub(crate) struct StreamChangesQuery {
 pub(crate) async fn stream_changes(
     Path(db_name): Path<String>,
     Query(query): Query<StreamChangesQuery>,
-    State(change_manager): State<ChangeManager>,
+    State(state): State<AppState>,
     cookies: CookieJar,
 ) -> Result<Sse<impl Stream<Item = Result<Event, HttpError>>>, CRRError> {
-    let permissions = AuthDatabase::open()?.get_permissions(&cookies, &db_name)?;
-    let mut subscription = change_manager.subscribe(&db_name).await?;
+    let permissions = AuthDatabase::open(state.env())?.get_permissions(&cookies, &db_name)?;
+    let env = state.env();
+    let mut subscription = state.change_manager().subscribe(&env, &db_name).await?;
     let db = Mutex::new(Database::open_readonly(
+        &env,
         db_name,
         query.db_version,
         permissions.clone(),

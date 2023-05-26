@@ -1,9 +1,12 @@
+use std::path::PathBuf;
+
 use rusqlite::{
     hooks::{AuthAction, AuthContext, Authorization},
     named_params, params_from_iter, LoadExtensionGuard, ToSql,
 };
 
 use crate::{
+    app_state::AppEnv,
     auth::{AllowedTables, DatabasePermissions},
     database::changes::Changeset,
     error::CRRError,
@@ -23,8 +26,10 @@ impl Database {
         &self.name
     }
 
-    pub(crate) fn file_name(name: &str) -> String {
-        format!("./data/{}.sqlite3", name)
+    pub(crate) fn file_path(env: &AppEnv, name: &str) -> PathBuf {
+        let mut path = PathBuf::from(env.data_dir());
+        path.push(format!("{}.sqlite3", name));
+        path
     }
 
     pub(crate) fn permissions(&self) -> &DatabasePermissions {
@@ -82,8 +87,12 @@ impl Database {
         });
     }
 
-    pub(crate) fn open(name: String, permissions: DatabasePermissions) -> Result<Self, CRRError> {
-        let conn = rusqlite::Connection::open(Self::file_name(&name))?;
+    pub(crate) fn open(
+        env: &AppEnv,
+        name: String,
+        permissions: DatabasePermissions,
+    ) -> Result<Self, CRRError> {
+        let conn = rusqlite::Connection::open(Self::file_path(env, &name))?;
 
         Self::load_crsqlite(&conn)?;
         Self::set_authorizer(&conn, permissions.clone());
@@ -97,12 +106,13 @@ impl Database {
     }
 
     pub(crate) fn open_readonly(
+        env: &AppEnv,
         name: String,
         db_version: i64,
         permissions: DatabasePermissions,
     ) -> Result<Self, CRRError> {
         let conn = rusqlite::Connection::open_with_flags(
-            Self::file_name(&name),
+            Self::file_path(env, &name),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
 
@@ -118,11 +128,12 @@ impl Database {
     }
 
     pub(crate) fn open_readonly_latest(
+        env: &AppEnv,
         name: String,
         permissions: DatabasePermissions,
     ) -> Result<Self, CRRError> {
         let conn = rusqlite::Connection::open_with_flags(
-            Self::file_name(&name),
+            Self::file_path(env, &name),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
 
@@ -137,24 +148,6 @@ impl Database {
             permissions,
             db_version,
         })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn open_for_test(
-        env: &crate::tests::TestEnv,
-        permissions: DatabasePermissions,
-    ) -> Self {
-        let conn = rusqlite::Connection::open(env.folder().join("data.sqlite3"))
-            .expect("Failed to open test database");
-
-        Self::load_crsqlite(&conn).expect("Failed to load crsqlite");
-
-        Self {
-            conn,
-            name: "data".to_owned(),
-            db_version: 0,
-            permissions,
-        }
     }
 
     pub(crate) fn db_version(&self) -> i64 {

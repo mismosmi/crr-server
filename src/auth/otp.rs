@@ -1,7 +1,7 @@
-use axum::extract::Json;
+use axum::extract::{Json, State};
 use serde::Deserialize;
 
-use crate::error::CRRError;
+use crate::{app_state::AppState, error::CRRError};
 
 use super::database::AuthDatabase;
 
@@ -10,8 +10,11 @@ pub(crate) struct OtpRequestData {
     email: String,
 }
 
-pub(crate) async fn post_otp(Json(data): Json<OtpRequestData>) -> Result<(), CRRError> {
-    let auth = AuthDatabase::open()?;
+pub(crate) async fn post_otp(
+    State(state): State<AppState>,
+    Json(data): Json<OtpRequestData>,
+) -> Result<(), CRRError> {
+    let auth = AuthDatabase::open(state.env())?;
 
     let otp = nanoid::nanoid!();
 

@@ -1,10 +1,10 @@
-use axum::extract::Json;
+use axum::extract::{Json, State};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use rusqlite::named_params;
 use serde::Deserialize;
 use time::Duration;
 
-use crate::error::CRRError;
+use crate::{app_state::AppState, error::CRRError};
 
 use super::database::AuthDatabase;
 
@@ -15,9 +15,10 @@ pub(crate) struct TokenRequestData {
 
 pub(crate) async fn post_token(
     mut cookies: CookieJar,
+    State(state): State<AppState>,
     Json(data): Json<TokenRequestData>,
 ) -> Result<CookieJar, CRRError> {
-    let auth = AuthDatabase::open()?;
+    let auth = AuthDatabase::open(state.env())?;
 
     let user_id: i64 = match data.otp.as_ref() {
         Some(otp) => auth

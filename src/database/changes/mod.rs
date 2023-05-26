@@ -15,21 +15,21 @@ pub(crate) use stream::stream_changes;
 #[cfg(test)]
 mod tests {
     use crate::{
+        app_state::AppEnv,
         database::{
             changes::{change_manager::ChangeManager, Changeset},
             migrate::tests::setup_foo,
             Value,
         },
         error::CRRError,
-        tests::TestEnv,
     };
 
     #[test]
     fn list_changes() {
-        let env = TestEnv::new();
+        let env = AppEnv::test_env();
         setup_foo(&env);
 
-        let mut db = env.db();
+        let mut db = env.test_db();
 
         {
             let mut changes = db.all_changes();
@@ -71,17 +71,17 @@ mod tests {
 
     #[tokio::test]
     async fn react_to_changes() {
-        let env = TestEnv::new();
+        let env = AppEnv::test_env();
         setup_foo(&env);
 
         let change_manager = ChangeManager::new();
 
         let mut sub = change_manager
-            .subscribe_for_test(&env)
+            .subscribe(&env, AppEnv::TEST_DB_NAME)
             .await
             .expect("Failed to set up subscription");
 
-        env.db()
+        env.test_db()
             .execute("INSERT INTO foo (bar) VALUES (?)", ["baz"])
             .expect("Failed to insert data");
 
@@ -99,12 +99,12 @@ mod tests {
     #[test]
     fn sync_changes_to_database() {
         tracing_subscriber::fmt::init();
-        let env_a = TestEnv::new();
+        let env_a = AppEnv::test_env();
         setup_foo(&env_a);
-        let env_b = TestEnv::new();
+        let env_b = AppEnv::test_env();
         setup_foo(&env_b);
 
-        let mut db_a = env_a.db();
+        let mut db_a = env_a.test_db();
 
         db_a.execute("INSERT INTO foo (bar) VALUES ('baz')", [])
             .expect("Failed to insert stuff");
@@ -114,7 +114,7 @@ mod tests {
             .collect::<Result<Vec<Changeset>, CRRError>>()
             .expect("Failed to retrieve changes");
 
-        let mut db_b = env_b.db();
+        let mut db_b = env_b.test_db();
         db_b.apply_changes(changes)
             .expect("Failed to apply changes");
 

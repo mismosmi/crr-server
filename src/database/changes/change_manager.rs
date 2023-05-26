@@ -2,7 +2,7 @@ use std::{collections::hash_map::Entry, sync::Arc};
 
 use tokio::sync::broadcast::{self, error::SendError};
 
-use crate::{auth::DatabasePermissions, database::Database, error::CRRError};
+use crate::{app_state::AppEnv, auth::DatabasePermissions, database::Database, error::CRRError};
 
 use super::{DatabaseHandle, Message, Subscription};
 
@@ -51,7 +51,11 @@ impl ChangeManager {
         Self(handles)
     }
 
-    pub(crate) async fn subscribe(&self, db_name: &str) -> Result<Subscription, CRRError> {
+    pub(crate) async fn subscribe(
+        &self,
+        env: &AppEnv,
+        db_name: &str,
+    ) -> Result<Subscription, CRRError> {
         if let Some(handle) = self.0.read().await.get(db_name) {
             return Ok(handle.subscribe());
         }
@@ -59,36 +63,14 @@ impl ChangeManager {
         match self.0.write().await.entry(db_name.to_owned()) {
             Entry::Occupied(entry) => Ok(entry.get().subscribe()),
             Entry::Vacant(entry) => {
-                let database =
-                    Database::open_readonly_latest(db_name.to_owned(), DatabasePermissions::Full)?;
+                let database = Database::open_readonly_latest(
+                    env,
+                    db_name.to_owned(),
+                    DatabasePermissions::Full,
+                )?;
                 let (handle, subscription) = Self::add_handle(database).await?;
                 entry.insert(handle);
 
-                Ok(subscription)
-            }
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn subscribe_for_test(
-        &self,
-        env: &crate::tests::TestEnv,
-    ) -> Result<Subscription, CRRError> {
-        tracing::info!("Subscribe for test");
-        if let Some(handle) = self.0.read().await.get(env.db().name()) {
-            return Ok(handle.subscribe());
-        }
-
-        match self
-            .0
-            .write()
-            .await
-            .entry(crate::tests::TestEnv::DB_NAME.to_owned())
-        {
-            Entry::Occupied(entry) => Ok(entry.get().subscribe()),
-            Entry::Vacant(entry) => {
-                let (handle, subscription) = Self::add_handle(env.db()).await?;
-                entry.insert(handle);
                 Ok(subscription)
             }
         }

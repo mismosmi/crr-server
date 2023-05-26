@@ -45,6 +45,8 @@ pub(crate) enum CRRError {
     SignalSendError(#[from] tokio::sync::mpsc::error::SendError<()>),
     #[error("JSON Error: {0}")]
     JsonError(#[from] serde_json::Error),
+    #[error("Database {0} is reserved for Internal Purposes")]
+    ReservedName(String),
 }
 
 #[derive(Error, Debug, Clone)]

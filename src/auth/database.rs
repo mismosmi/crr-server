@@ -1,43 +1,41 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use axum_extra::extract::CookieJar;
 use rusqlite::{named_params, OpenFlags};
 
-use crate::{database::Database, error::CRRError};
+use crate::{app_state::AppEnv, database::Database, error::CRRError};
 
-use super::{
-    permissions::{self, PartialPermissions},
-    DatabasePermissions,
-};
+use super::{permissions::PartialPermissions, DatabasePermissions};
 
 pub(crate) struct AuthDatabase {
     conn: rusqlite::Connection,
+    env: Arc<AppEnv>,
 }
 
 impl AuthDatabase {
-    pub(crate) fn open() -> Result<Self, CRRError> {
+    const RESERVED_NAMES: [&str; 2] = ["auth", "sync"];
+
+    fn file_path(env: &AppEnv) -> PathBuf {
+        let mut path = PathBuf::from(env.data_dir());
+        path.push("auth.sqlite3");
+        path
+    }
+
+    pub(crate) fn open(env: Arc<AppEnv>) -> Result<Self, CRRError> {
         Ok(Self {
-            conn: rusqlite::Connection::open("./data/auth.sqlite3")?,
+            conn: rusqlite::Connection::open(Self::file_path(&env))?,
+            env,
         })
     }
 
-    pub(crate) fn open_readonly() -> Result<Self, CRRError> {
+    pub(crate) fn open_readonly(env: Arc<AppEnv>) -> Result<Self, CRRError> {
         Ok(Self {
             conn: rusqlite::Connection::open_with_flags(
-                "./data/auth.sqlite3",
+                Self::file_path(&env),
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )?,
+            env,
         })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn open_for_test(env: &crate::tests::TestEnv) -> Self {
-        use crate::tests::TestEnv;
-
-        Self {
-            conn: rusqlite::Connection::open(env.folder().join(TestEnv::DB_NAME))
-                .expect("failed to open metadata database"),
-        }
     }
 
     pub(crate) fn apply_migrations(&self) -> Result<(), CRRError> {
@@ -131,6 +129,10 @@ impl AuthDatabase {
         cookies: &CookieJar,
         db_name: &str,
     ) -> Result<DatabasePermissions, CRRError> {
+        if Self::RESERVED_NAMES.contains(&db_name) {
+            return Err(CRRError::ReservedName(db_name.to_owned()));
+        }
+
         let user_id = self.authenticate_user(cookies)?;
 
         let permissions = self.get_permissions_for_user(user_id, db_name)?;
@@ -154,7 +156,7 @@ impl AuthDatabase {
 
         match self.get_permissions(cookies, db_name) {
             Err(CRRError::Unauthorized(message)) => {
-                let file: PathBuf = Database::file_name(&db_name).into();
+                let file: PathBuf = Database::file_path(&self.env, &db_name).into();
                 if file.exists() {
                     Err(CRRError::Unauthorized(message))
                 } else {

@@ -1,9 +1,12 @@
-use axum::{extract::Path, Json};
+use axum::{
+    extract::{Path, State},
+    Json,
+};
 use axum_extra::extract::CookieJar;
 use rusqlite::params_from_iter;
 use serde::{Deserialize, Serialize};
 
-use crate::{auth::database::AuthDatabase, error::CRRError};
+use crate::{app_state::AppState, auth::database::AuthDatabase, error::CRRError};
 
 use super::{Database, Value};
 
@@ -23,11 +26,13 @@ pub(crate) struct RunPostResponse {
 pub(crate) async fn post_run(
     cookies: CookieJar,
     Path(db_name): Path<String>,
+    State(state): State<AppState>,
     Json(data): Json<RunPostData>,
 ) -> Result<axum::Json<RunPostResponse>, CRRError> {
-    let permissions = AuthDatabase::open_readonly()?.get_permissions(&cookies, &db_name)?;
+    let permissions =
+        AuthDatabase::open_readonly(state.env())?.get_permissions(&cookies, &db_name)?;
 
-    let db = Database::open(db_name.clone(), permissions)?;
+    let db = Database::open(&state.env(), db_name.clone(), permissions)?;
 
     let mut stmt = db.prepare(&data.sql)?;
     let column_count = stmt.column_count();
