@@ -2,7 +2,7 @@ use axum::response::sse::Event;
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 
-use crate::{auth::DatabasePermissions, database::Value, error::CRRError};
+use crate::{database::Value, error::CRRError};
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
 pub(crate) struct Changeset {

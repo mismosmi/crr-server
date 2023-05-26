@@ -1,13 +1,9 @@
 use std::{
-    fs::Permissions,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use crate::{
-    auth::{database::AuthDatabase, DatabasePermissions},
-    database::{changes::ChangeManager, Database},
-};
+use crate::database::changes::ChangeManager;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -55,6 +51,8 @@ impl AppEnv {
     pub(crate) const TEST_DB_NAME: &str = "data";
 
     pub(crate) fn test_env() -> Arc<Self> {
+        use crate::auth::AuthDatabase;
+
         let mut data_dir = PathBuf::from("./test-data");
         data_dir.push(nanoid::nanoid!());
 
@@ -70,6 +68,8 @@ impl AppEnv {
     }
 
     pub(crate) fn test_db(&self) -> crate::database::Database {
+        use crate::{auth::DatabasePermissions, database::Database};
+
         Database::open(
             self,
             Self::TEST_DB_NAME.to_owned(),

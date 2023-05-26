@@ -1,9 +1,7 @@
 use axum::extract::{Json, Path, State};
 use axum_extra::extract::CookieJar;
 
-use crate::{
-    app_state::AppState, auth::database::AuthDatabase, database::Database, error::CRRError,
-};
+use crate::{app_state::AppState, auth::AuthDatabase, database::Database, error::CRRError};
 
 use super::Changeset;
 

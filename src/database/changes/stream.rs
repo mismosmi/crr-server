@@ -9,13 +9,11 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 
 use crate::{
-    auth::database::AuthDatabase,
+    auth::AuthDatabase,
     database::Database,
     error::{CRRError, HttpError},
     AppState,
 };
-
-use super::ChangeManager;
 
 #[derive(Deserialize)]
 pub(crate) struct StreamChangesQuery {

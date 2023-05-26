@@ -46,12 +46,6 @@ impl ObjectPermissions {
             _ => false,
         }
     }
-    pub(crate) fn partial(&self) -> bool {
-        match self {
-            Self::Full => true,
-            Self::Partial(p) => !p.is_empty(),
-        }
-    }
     pub(crate) fn read(&self) -> bool {
         match self {
             Self::Full => true,
@@ -165,47 +159,22 @@ impl DatabasePermissions {
             _ => false,
         }
     }
-    pub(crate) fn partial(&self) -> bool {
-        match self {
-            Self::Full => true,
-            Self::Partial { database, tables } => {
-                !database.is_empty() || tables.values().any(|table| table.partial())
-            }
-        }
-    }
 
+    #[cfg(test)]
     pub(crate) fn read(&self) -> bool {
         match self {
             Self::Full => true,
             Self::Partial { database, .. } => database.read,
         }
     }
-    pub(crate) fn partial_read(&self) -> bool {
-        match self {
-            Self::Full => true,
-            Self::Partial { database, tables } => {
-                database.read || tables.values().any(|table| table.read())
-            }
-        }
-    }
+    #[cfg(test)]
     pub(crate) fn insert(&self) -> bool {
         match self {
             Self::Full => true,
             Self::Partial { database, .. } => database.insert,
         }
     }
-    pub(crate) fn update(&self) -> bool {
-        match self {
-            Self::Full => true,
-            Self::Partial { database, .. } => database.update,
-        }
-    }
-    pub(crate) fn delete(&self) -> bool {
-        match self {
-            Self::Full => true,
-            Self::Partial { database, .. } => database.delete,
-        }
-    }
+    #[cfg(test)]
     pub(crate) fn full_table(&self, table_name: &str) -> bool {
         match self {
             Self::Full => true,

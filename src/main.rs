@@ -6,7 +6,7 @@ pub(crate) mod mail;
 mod serde_base64;
 
 pub(crate) use app_state::AppState;
-use auth::database::AuthDatabase;
+use auth::AuthDatabase;
 use axum::{Router, Server};
 
 #[tokio::main]

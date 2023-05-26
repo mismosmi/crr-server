@@ -27,18 +27,8 @@ pub(crate) enum CRRError {
     IOError(#[from] std::io::Error),
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
-    #[error("Validation Error: {0}")]
-    ValidationError(String),
-    //#[error("Type Error: Array-typed parameters are currently not supported")]
-    //ParameterArrayTypeError,
-    //#[error("Type Error: Object-typed parameters are currently not supported")]
-    //ParameterObjectTypeError,
-    //#[error("Type Error: Failed to deserialize number")]
-    //ParameterNumberTypeError,
     #[error("Unsupported OS: {0}")]
     UnsupportedOS(String),
-    //#[error("Unable to serialize Binary Data (Blob)")]
-    //BlobSerialization,
     #[error("Poisoned Lock Error in {0}")]
     PoisonedLockError(&'static str),
     #[error("Message Passing Error: {0}")]
@@ -63,10 +53,6 @@ impl From<CRRError> for HttpError {
         match value {
             CRRError::Unauthorized(message) => Self {
                 status_code: StatusCode::UNAUTHORIZED,
-                message,
-            },
-            CRRError::ValidationError(message) => Self {
-                status_code: StatusCode::BAD_REQUEST,
                 message,
             },
             _ => Self {

@@ -154,10 +154,6 @@ impl Database {
         self.db_version
     }
 
-    pub(crate) fn set_db_version(&mut self, db_version: i64) {
-        self.db_version = db_version;
-    }
-
     pub(crate) fn changes<'d, 's>(
         &'d mut self,
         site_id: &'s Vec<u8>,

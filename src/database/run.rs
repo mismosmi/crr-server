@@ -6,7 +6,7 @@ use axum_extra::extract::CookieJar;
 use rusqlite::params_from_iter;
 use serde::{Deserialize, Serialize};
 
-use crate::{app_state::AppState, auth::database::AuthDatabase, error::CRRError};
+use crate::{app_state::AppState, auth::AuthDatabase, error::CRRError};
 
 use super::{Database, Value};
 

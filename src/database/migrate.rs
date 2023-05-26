@@ -1,4 +1,4 @@
-use crate::{auth::database::AuthDatabase, error::CRRError, AppState};
+use crate::{auth::AuthDatabase, error::CRRError, AppState};
 use axum::extract::{Json, Path, State};
 use axum_extra::extract::CookieJar;
 use serde::Deserialize;
