@@ -1,9 +1,6 @@
 use axum::{extract::Path, Json};
 use axum_extra::extract::CookieJar;
-use rusqlite::{
-    hooks::{AuthAction, AuthContext, Authorization},
-    params_from_iter,
-};
+use rusqlite::params_from_iter;
 use serde::{Deserialize, Serialize};
 
 use crate::{auth::database::AuthDatabase, error::CRRError};
@@ -30,19 +27,7 @@ pub(crate) async fn post_run(
 ) -> Result<axum::Json<RunPostResponse>, CRRError> {
     let permissions = AuthDatabase::open_readonly()?.get_permissions(&cookies, &db_name)?;
 
-    let db = Database::open(db_name.clone())?;
-
-    if !permissions.full() {
-        db.authorizer(Some(move |context: AuthContext| match context.action {
-            AuthAction::Select => Authorization::Allow,
-            AuthAction::Read { table_name, .. } => auth(permissions.read_table(table_name)),
-            AuthAction::Update { table_name, .. } => auth(permissions.update_table(table_name)),
-            AuthAction::Insert { table_name } => auth(permissions.insert_table(table_name)),
-            AuthAction::Delete { table_name } => auth(permissions.delete_table(table_name)),
-            AuthAction::Transaction { operation } => Authorization::Allow,
-            _ => Authorization::Deny,
-        }));
-    }
+    let db = Database::open(db_name.clone(), permissions)?;
 
     let mut stmt = db.prepare(&data.sql)?;
     let column_count = stmt.column_count();
@@ -78,7 +63,7 @@ pub(crate) async fn post_run(
             let mut rows = Vec::new();
 
             while let Some(raw_row) = raw_rows.next()? {
-                let mut row = Vec::new();
+                let mut row = Vec::with_capacity(column_count);
 
                 for i in 0..column_count {
                     row.push(raw_row.get(i)?);
@@ -92,13 +77,5 @@ pub(crate) async fn post_run(
                 changes: None,
             }))
         }
-    }
-}
-
-fn auth(value: bool) -> Authorization {
-    if value {
-        Authorization::Allow
-    } else {
-        Authorization::Deny
     }
 }

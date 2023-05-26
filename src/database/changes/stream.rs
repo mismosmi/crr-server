@@ -1,19 +1,23 @@
-use std::convert::Infallible;
-
+use async_stream::try_stream;
 use axum::{
     extract::{Path, Query, State},
     response::{sse::Event, Sse},
 };
 use axum_extra::extract::CookieJar;
-use futures::{stream, Stream, StreamExt};
+use futures::Stream;
 use serde::Deserialize;
+use tokio::sync::Mutex;
 
-use crate::{auth::database::AuthDatabase, database::Database, error::CRRError};
+use crate::{
+    auth::database::AuthDatabase,
+    database::Database,
+    error::{CRRError, HttpError},
+};
 
-use super::{ChangeManager, Message};
+use super::ChangeManager;
 
 #[derive(Deserialize)]
-struct StreamChangesQuery {
+pub(crate) struct StreamChangesQuery {
     #[serde(with = "crate::serde_base64")]
     site_id: Vec<u8>,
     db_version: i64,
@@ -24,13 +28,42 @@ pub(crate) async fn stream_changes(
     Query(query): Query<StreamChangesQuery>,
     State(change_manager): State<ChangeManager>,
     cookies: CookieJar,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, CRRError> {
+) -> Result<Sse<impl Stream<Item = Result<Event, HttpError>>>, CRRError> {
     let permissions = AuthDatabase::open()?.get_permissions(&cookies, &db_name)?;
-    let mut db = Database::open_readonly(db_name, query.db_version, permissions)?;
+    let mut subscription = change_manager.subscribe(&db_name).await?;
+    let db = Mutex::new(Database::open_readonly(
+        db_name,
+        query.db_version,
+        permissions.clone(),
+    )?);
 
-    let changes = db.changes(&query.site_id)?;
+    Ok(Sse::new(try_stream! {
+        for message in db.lock().await.changes(&query.site_id)? {
+            yield Event::try_from(message?)?;
+        }
 
-    let initialStream = stream::iter(changes).map(|message| Ok(Message::from(message).into()));
+        let mut db_version = db.lock().await.db_version();
+        drop(db);
 
-    Ok(Sse::new(initialStream))
+        while let Ok(message) = subscription.recv().await {
+            let changeset = message?;
+
+            if !permissions.read_table(changeset.table()) {
+                continue;
+            }
+
+            if changeset.db_version() <= db_version {
+                continue;
+            }
+
+            if changeset.site_id() == &query.site_id {
+                continue;
+            }
+
+            db_version = changeset.db_version();
+
+            yield Event::try_from(changeset)?;
+        }
+
+    }))
 }

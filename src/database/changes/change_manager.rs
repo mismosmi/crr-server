@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::{collections::hash_map::Entry, sync::Arc};
 
 use tokio::sync::broadcast::{self, error::SendError};
 
-use crate::{database::Database, error::CRRError};
+use crate::{auth::DatabasePermissions, database::Database, error::CRRError};
 
-use super::{DatabaseHandle, Message, Signal, Subscription};
+use super::{DatabaseHandle, Message, Subscription};
 
 #[derive(Clone)]
 pub(crate) struct ChangeManager(
@@ -23,13 +23,14 @@ impl ChangeManager {
 
         tokio::spawn(async move {
             loop {
+                tracing::debug!("Run GC");
                 tokio::time::sleep(tokio::time::Duration::from_secs(240)).await;
 
                 match gc_handles.upgrade() {
-                    Some(gc_handles) => {
-                        let lock = gc_handles.write().await;
+                    Some(handles) => {
+                        let mut lock = handles.write().await;
 
-                        let collect = Vec::new();
+                        let mut collect = Vec::new();
                         for (db_name, handle) in lock.iter() {
                             if handle.is_orphan() {
                                 collect.push(db_name.to_owned());
@@ -42,80 +43,96 @@ impl ChangeManager {
                     }
                     None => return,
                 }
+
+                tracing::debug!("GC Done");
             }
         });
 
         Self(handles)
     }
 
-    pub(crate) async fn subscribe(&self, database: Database) -> Result<Subscription, CRRError> {
-        if let Some(handle) = self.0.read().await.get(database.name()) {
-            handle
-                .send_signal(Signal::SetDBVersion(database.db_version()))
-                .await?;
-
+    pub(crate) async fn subscribe(&self, db_name: &str) -> Result<Subscription, CRRError> {
+        if let Some(handle) = self.0.read().await.get(db_name) {
             return Ok(handle.subscribe());
         }
 
-        self.add_handle(database).await
+        match self.0.write().await.entry(db_name.to_owned()) {
+            Entry::Occupied(entry) => Ok(entry.get().subscribe()),
+            Entry::Vacant(entry) => {
+                let database =
+                    Database::open_readonly_latest(db_name.to_owned(), DatabasePermissions::Full)?;
+                let (handle, subscription) = Self::add_handle(database).await?;
+                entry.insert(handle);
+
+                Ok(subscription)
+            }
+        }
     }
 
-    async fn add_handle(&self, mut database: Database) -> Result<Subscription, CRRError> {
+    #[cfg(test)]
+    pub(crate) async fn subscribe_for_test(
+        &self,
+        env: &crate::tests::TestEnv,
+    ) -> Result<Subscription, CRRError> {
+        tracing::info!("Subscribe for test");
+        if let Some(handle) = self.0.read().await.get(env.db().name()) {
+            return Ok(handle.subscribe());
+        }
+
+        match self
+            .0
+            .write()
+            .await
+            .entry(crate::tests::TestEnv::DB_NAME.to_owned())
+        {
+            Entry::Occupied(entry) => Ok(entry.get().subscribe()),
+            Entry::Vacant(entry) => {
+                let (handle, subscription) = Self::add_handle(env.db()).await?;
+                entry.insert(handle);
+                Ok(subscription)
+            }
+        }
+    }
+
+    async fn add_handle(
+        mut database: Database,
+    ) -> Result<(DatabaseHandle, Subscription), CRRError> {
+        tracing::info!(
+            "Start new Database Watcher Task for \"{}\"",
+            database.name()
+        );
         let (message_sender, message_receiver) = tokio::sync::broadcast::channel::<Message>(32);
-        let (signal_sender, mut signal_receiver) = tokio::sync::mpsc::channel::<Signal>(32);
+        let (signal_sender, mut signal_receiver) = tokio::sync::mpsc::channel::<()>(1);
 
         let hook_signal_sender = signal_sender.downgrade();
 
         database.update_hook(Some(
             move |_action, _arg1: &'_ str, _arg2: &'_ str, _rowid| {
                 if let Some(sender) = hook_signal_sender.upgrade() {
-                    let _ = sender.try_send(Signal::Update);
+                    let _ = sender.try_send(());
                 }
             },
         ));
 
         let task_message_sender = message_sender.clone();
 
-        let database_name = database.name().to_owned();
-
         tokio::spawn(async move {
             if let Err(_) = Self::send_changes(&mut database, &task_message_sender) {
+                // no receivers, stop this task
                 return;
             }
 
-            while let Some(signal) = signal_receiver.recv().await {
-                match signal {
-                    Signal::Update => {
-                        if let Err(_) = Self::send_changes(&mut database, &task_message_sender) {
-                            return;
-                        }
-                    }
-                    Signal::SetDBVersion(db_version) => {
-                        if db_version < database.db_version() {
-                            // clear queue
-                            while task_message_sender.len() > 0 {
-                                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                            }
-
-                            // set back db_version
-                            database.set_db_version(db_version);
-
-                            if let Err(_) = Self::send_changes(&mut database, &task_message_sender)
-                            {
-                                return;
-                            }
-                        }
-                    }
+            while let Some(_) = signal_receiver.recv().await {
+                if let Err(_) = Self::send_changes(&mut database, &task_message_sender) {
+                    // no receivers, stop this task
+                    return;
                 }
             }
         });
 
-        self.0.write().await.insert(
-            database_name,
-            DatabaseHandle::from(message_sender, signal_sender),
-        );
+        let handle = DatabaseHandle::from(message_sender, signal_sender);
 
-        Ok(message_receiver)
+        Ok((handle, message_receiver))
     }
 
     fn send_changes(
@@ -123,7 +140,7 @@ impl ChangeManager {
         sender: &broadcast::Sender<Message>,
     ) -> Result<(), SendError<Message>> {
         for message in database.all_changes() {
-            sender.send(message.into())?;
+            sender.send(message.map_err(Into::into))?;
         }
 
         Ok(())

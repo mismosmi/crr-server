@@ -1,4 +1,7 @@
-use rusqlite::{named_params, params_from_iter, LoadExtensionGuard, ToSql};
+use rusqlite::{
+    hooks::{AuthAction, AuthContext, Authorization},
+    named_params, params_from_iter, LoadExtensionGuard, ToSql,
+};
 
 use crate::{
     auth::{AllowedTables, DatabasePermissions},
@@ -55,10 +58,35 @@ impl Database {
         Ok(())
     }
 
+    fn set_authorizer(conn: &rusqlite::Connection, permissions: DatabasePermissions) {
+        fn auth(value: bool) -> Authorization {
+            if value {
+                Authorization::Allow
+            } else {
+                Authorization::Deny
+            }
+        }
+
+        conn.authorizer(if permissions.full() {
+            None
+        } else {
+            Some(move |context: AuthContext| match context.action {
+                AuthAction::Select => Authorization::Allow,
+                AuthAction::Read { table_name, .. } => auth(permissions.read_table(table_name)),
+                AuthAction::Update { table_name, .. } => auth(permissions.update_table(table_name)),
+                AuthAction::Insert { table_name } => auth(permissions.insert_table(table_name)),
+                AuthAction::Delete { table_name } => auth(permissions.delete_table(table_name)),
+                AuthAction::Transaction { operation: _ } => Authorization::Allow,
+                _ => Authorization::Deny,
+            })
+        });
+    }
+
     pub(crate) fn open(name: String, permissions: DatabasePermissions) -> Result<Self, CRRError> {
         let conn = rusqlite::Connection::open(Self::file_name(&name))?;
 
         Self::load_crsqlite(&conn)?;
+        Self::set_authorizer(&conn, permissions.clone());
 
         Ok(Self {
             conn,
@@ -79,12 +107,35 @@ impl Database {
         )?;
 
         Self::load_crsqlite(&conn)?;
+        Self::set_authorizer(&conn, permissions.clone());
 
         Ok(Self {
             conn,
             name,
             db_version,
             permissions,
+        })
+    }
+
+    pub(crate) fn open_readonly_latest(
+        name: String,
+        permissions: DatabasePermissions,
+    ) -> Result<Self, CRRError> {
+        let conn = rusqlite::Connection::open_with_flags(
+            Self::file_name(&name),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+
+        Self::load_crsqlite(&conn)?;
+        Self::set_authorizer(&conn, permissions.clone());
+
+        let db_version: i64 = conn.query_row("SELECT crsql_dbversion()", [], |row| row.get(0))?;
+
+        Ok(Self {
+            conn,
+            name,
+            permissions,
+            db_version,
         })
     }
 
@@ -197,8 +248,14 @@ impl Database {
         &'d mut self,
     ) -> ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + 'd> {
         ChangesIter::new(move || {
+            if !self.permissions.full() {
+                return Err(CRRError::Unauthorized(
+                    "Full access is required to listen to all changes".to_owned(),
+                ));
+            }
+
             let query = "
-                SELECT \"table\", pk, cid, val, col_version, db_version, COALESCE(site_id, crsql_site_id())
+                SELECT \"table\", pk, cid, val, col_version, db_version, COALESCE(site_id, crsql_siteid())
                 FROM crsql_changes
                 WHERE db_version > ?
             ";
@@ -289,7 +346,7 @@ impl std::ops::Drop for Database {
     }
 }
 
-struct ChangesIter<F>
+pub(crate) struct ChangesIter<F>
 where
     F: FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + Send,
 {
@@ -326,7 +383,7 @@ where
             match self
                 .load_page
                 .lock()
-                .map_err(|e| CRRError::PoisonedLockError(Box::new(e)))
+                .map_err(|_| CRRError::PoisonedLockError("ChangesIter::next"))
                 .and_then(|mut lock| lock())
             {
                 Ok((page, has_next_page)) => {

@@ -1,0 +1,2 @@
+#[derive(Clone)]
+struct Env {}

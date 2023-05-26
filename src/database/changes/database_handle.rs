@@ -2,19 +2,19 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::error::CRRError;
 
-use super::{Message, Signal};
+use super::Message;
 
 pub(crate) type Subscription = broadcast::Receiver<Message>;
 
 pub(crate) struct DatabaseHandle {
     message_sender: broadcast::Sender<Message>,
-    signal_sender: mpsc::Sender<Signal>,
+    signal_sender: mpsc::Sender<()>,
 }
 
 impl DatabaseHandle {
     pub(crate) fn from(
         message_sender: broadcast::Sender<Message>,
-        signal_sender: mpsc::Sender<Signal>,
+        signal_sender: mpsc::Sender<()>,
     ) -> Self {
         Self {
             message_sender,
@@ -26,8 +26,8 @@ impl DatabaseHandle {
         self.message_sender.receiver_count() < 1
     }
 
-    pub(crate) async fn send_signal(&self, signal: Signal) -> Result<(), CRRError> {
-        self.signal_sender.send(signal).await?;
+    pub(crate) async fn send_signal(&self) -> Result<(), CRRError> {
+        self.signal_sender.send(()).await?;
 
         Ok(())
     }
@@ -38,5 +38,9 @@ impl DatabaseHandle {
 
     pub(crate) fn connection_count(&self) -> usize {
         self.message_sender.receiver_count()
+    }
+
+    pub(crate) fn release(self) -> broadcast::Sender<Message> {
+        self.message_sender
     }
 }

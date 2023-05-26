@@ -1,10 +1,16 @@
-use crate::{auth::database::AuthDatabase, database::Database};
+use crate::{
+    auth::{database::AuthDatabase, DatabasePermissions},
+    database::Database,
+};
 
+#[derive(Clone)]
 pub(crate) struct TestEnv {
     folder: std::path::PathBuf,
 }
 
 impl TestEnv {
+    pub(crate) const DB_NAME: &'static str = "data.sqlite3";
+
     pub(crate) fn new() -> Self {
         let this = Self {
             folder: format!("./test-data/{}", nanoid::nanoid!()).into(),
@@ -29,7 +35,7 @@ impl TestEnv {
     }
 
     pub(crate) fn db(&self) -> Database {
-        Database::open_for_test(self)
+        Database::open_for_test(self, DatabasePermissions::Full)
     }
 }
 

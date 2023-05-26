@@ -1,7 +1,8 @@
+use axum::response::sse::Event;
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 
-use crate::{database::Value, error::CRRError};
+use crate::{auth::DatabasePermissions, database::Value, error::CRRError};
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
 pub(crate) struct Changeset {
@@ -19,7 +20,7 @@ impl Changeset {
     pub(crate) fn size(&self) -> usize {
         self.table.len()
             + self.pk.size()
-            + self.cid.map(|cid| cid.len()).unwrap_or_default()
+            + self.cid.as_ref().map(|cid| cid.len()).unwrap_or_default()
             + self.val.size()
             + 16
             + self.site_id.len()
@@ -67,5 +68,13 @@ impl<'a> TryFrom<&Row<'a>> for Changeset {
             db_version: row.get(5)?,
             site_id: row.get(6)?,
         })
+    }
+}
+
+impl TryFrom<Changeset> for Event {
+    type Error = CRRError;
+
+    fn try_from(value: Changeset) -> Result<Self, Self::Error> {
+        Ok(Event::default().event("change").json_data(value)?)
     }
 }

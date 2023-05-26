@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::serde_base64;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 pub(crate) enum Value {
     Null,

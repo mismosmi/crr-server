@@ -2,20 +2,24 @@ mod change_manager;
 mod changeset;
 mod database_handle;
 mod message;
-mod signal;
+mod post;
 mod stream;
 
 pub(crate) use change_manager::ChangeManager;
 pub(crate) use changeset::Changeset;
 pub(crate) use database_handle::{DatabaseHandle, Subscription};
 pub(crate) use message::Message;
-pub(crate) use signal::Signal;
+pub(crate) use post::post_changes;
+pub(crate) use stream::stream_changes;
 
 #[cfg(test)]
 mod tests {
-
     use crate::{
-        database::{changes::change_manager::ChangeManager, migrate::tests::setup_foo, Value},
+        database::{
+            changes::{change_manager::ChangeManager, Changeset},
+            migrate::tests::setup_foo,
+            Value,
+        },
         error::CRRError,
         tests::TestEnv,
     };
@@ -42,9 +46,9 @@ mod tests {
                 .expect("no changes registered")
                 .expect("error fetching changes");
 
-            assert_eq!(changeset.table, "foo");
-            assert_eq!(changeset.val, Value::text("baz"));
-            assert_eq!(changeset.db_version, 1);
+            assert_eq!(changeset.table(), "foo");
+            assert_eq!(changeset.val().clone(), Value::text("baz"));
+            assert_eq!(changeset.db_version(), 1);
 
             assert!(changes.next().is_none());
         }
@@ -59,8 +63,8 @@ mod tests {
                 .expect("no changes registered")
                 .expect("error fetching changes");
 
-            assert_eq!(changeset.val, Value::text("foobar"));
-            assert_eq!(changeset.db_version, 2);
+            assert_eq!(changeset.val().clone(), Value::text("foobar"));
+            assert_eq!(changeset.db_version(), 2);
             assert!(changes.next().is_none());
         }
     }
@@ -70,10 +74,10 @@ mod tests {
         let env = TestEnv::new();
         setup_foo(&env);
 
-        let change_manager = ChangeManager::new(env.meta());
+        let change_manager = ChangeManager::new();
 
         let mut sub = change_manager
-            .subscribe(env.db())
+            .subscribe_for_test(&env)
             .await
             .expect("Failed to set up subscription");
 
@@ -89,14 +93,16 @@ mod tests {
 
         println!("{:?}", &changeset);
 
-        assert_eq!(changeset.table, "foo")
+        assert_eq!(changeset.table(), "foo")
     }
 
     #[test]
     fn sync_changes_to_database() {
+        tracing_subscriber::fmt::init();
         let env_a = TestEnv::new();
         setup_foo(&env_a);
         let env_b = TestEnv::new();
+        setup_foo(&env_b);
 
         let mut db_a = env_a.db();
 

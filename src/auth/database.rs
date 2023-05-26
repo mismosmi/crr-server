@@ -1,9 +1,9 @@
-use std::fs;
+use std::{fs, path::PathBuf};
 
 use axum_extra::extract::CookieJar;
 use rusqlite::{named_params, OpenFlags};
 
-use crate::error::CRRError;
+use crate::{database::Database, error::CRRError};
 
 use super::{
     permissions::{self, PartialPermissions},
@@ -32,8 +32,10 @@ impl AuthDatabase {
 
     #[cfg(test)]
     pub(crate) fn open_for_test(env: &crate::tests::TestEnv) -> Self {
+        use crate::tests::TestEnv;
+
         Self {
-            conn: rusqlite::Connection::open(env.folder().join("auth.sqlite3"))
+            conn: rusqlite::Connection::open(env.folder().join(TestEnv::DB_NAME))
                 .expect("failed to open metadata database"),
         }
     }
@@ -143,7 +145,46 @@ impl AuthDatabase {
         Ok(permissions)
     }
 
-    fn update_permissions(
+    pub(crate) fn authorize_migration(
+        &self,
+        cookies: &CookieJar,
+        db_name: &str,
+    ) -> Result<DatabasePermissions, CRRError> {
+        let user_id = self.authenticate_user(cookies)?;
+
+        match self.get_permissions(cookies, db_name) {
+            Err(CRRError::Unauthorized(message)) => {
+                let file: PathBuf = Database::file_name(&db_name).into();
+                if file.exists() {
+                    Err(CRRError::Unauthorized(message))
+                } else {
+                    let permissions = DatabasePermissions::Full;
+
+                    self.conn.execute("BEGIN", [])?;
+
+                    let role_id = self
+                        .conn
+                        .prepare("INSERT INTO roles () VALUES ()")?
+                        .insert([])?;
+
+                    self.conn
+                        .prepare(
+                            "INSERT INTO user_roles (user_id, role_id) VALUES (:user_id, :role_id)",
+                        )?
+                        .insert(named_params! {":user_id": user_id, ":role_id": role_id})?;
+
+                    self.update_permissions(role_id, db_name, &permissions)?;
+
+                    self.conn.execute("COMMIT", [])?;
+
+                    Ok(permissions)
+                }
+            }
+            result => result,
+        }
+    }
+
+    pub(crate) fn update_permissions(
         &self,
         role_id: i64,
         database_name: &str,

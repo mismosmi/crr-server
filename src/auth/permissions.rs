@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use futures::stream::All;
-
 use crate::error::CRRError;
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -80,6 +78,7 @@ impl ObjectPermissions {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum DatabasePermissions {
     Full,
     Partial {
@@ -211,7 +210,7 @@ impl DatabasePermissions {
         match self {
             Self::Full => true,
             Self::Partial { tables, .. } => {
-                tables.get(table_name).map(|p| p.read()).unwrap_or(false)
+                tables.get(table_name).map(|p| p.full()).unwrap_or(false)
             }
         }
     }
@@ -267,6 +266,7 @@ impl DatabasePermissions {
     }
 }
 
+#[derive(PartialEq, Debug)]
 pub(crate) enum AllowedTables {
     All,
     Some(Vec<String>),
@@ -278,5 +278,86 @@ impl AllowedTables {
             Self::All => false,
             Self::Some(tables) => tables.is_empty(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::auth::AllowedTables;
+
+    use super::{DatabasePermissions, ObjectPermissions, PartialPermissions};
+
+    #[test]
+    fn full() {
+        let p = DatabasePermissions::Full;
+
+        assert!(p.full(), "Has full access to Database");
+        assert!(p.full_table("foo"), "Has full access to arbitrary table");
+        assert!(p.read(), "Has read access to Database");
+        assert!(p.read_table("bar"), "Has read access to arbitrary table");
+        assert!(p.insert(), "Has insert access to Database");
+        assert!(
+            p.delete_table("baz"),
+            "Has delete access to arbitrary table"
+        );
+
+        let readable_tables = p.readable_tables();
+
+        assert_eq!(readable_tables.is_empty(), false);
+        assert_eq!(readable_tables, AllowedTables::All);
+    }
+
+    #[test]
+    fn readonly() {
+        let p = DatabasePermissions::Partial {
+            database: PartialPermissions {
+                read: true,
+                insert: false,
+                update: false,
+                delete: false,
+            },
+            tables: HashMap::new(),
+        };
+
+        assert!(!p.full());
+        assert!(p.read());
+        assert!(!p.full_table("foo"));
+        assert!(p.read_table("bar"));
+        assert!(!p.insert());
+        assert!(!p.update_table("baz"));
+
+        assert_eq!(p.readable_tables(), AllowedTables::All);
+    }
+
+    #[test]
+    fn read_table() {
+        let mut tables = HashMap::new();
+        tables.insert(
+            "foo".to_owned(),
+            ObjectPermissions::Partial(PartialPermissions {
+                read: true,
+                insert: false,
+                update: false,
+                delete: false,
+            }),
+        );
+        let p = DatabasePermissions::Partial {
+            database: PartialPermissions::default(),
+            tables,
+        };
+
+        assert!(!p.full(), "No full permissions");
+        assert!(!p.full_table("foo"), "No full table permissions");
+        assert!(!p.read(), "No read permissions for whole DB");
+        assert!(p.read_table("foo"), "Read permissions for table");
+        assert!(!p.insert_table("foo"), "No insert permissions for table");
+
+        assert_eq!(
+            p.readable_tables(),
+            AllowedTables::Some(vec!["foo".to_owned()]),
+            "Table is in readable tables"
+        );
     }
 }

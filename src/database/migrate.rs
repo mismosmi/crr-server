@@ -1,9 +1,12 @@
+use std::{fs::Permissions, path::PathBuf};
+
 use crate::{
     auth::{database::AuthDatabase, DatabasePermissions},
     error::CRRError,
 };
 use axum::extract::{Json, Path, State};
 use axum_extra::extract::CookieJar;
+use lettre::message;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -20,7 +23,7 @@ pub(crate) async fn post_migrate(
     State(change_manager): State<ChangeManager>,
     Json(data): Json<MigratePostData>,
 ) -> Result<(), CRRError> {
-    let permissions = AuthDatabase::open_readonly()?.get_permissions(&cookies, &db_name)?;
+    let permissions = AuthDatabase::open()?.authorize_migration(&cookies, &db_name)?;
 
     change_manager.kill_connection(&db_name).await;
 
