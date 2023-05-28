@@ -1,9 +1,18 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
+use axum::{
+    async_trait,
+    extract::{FromRequestParts, State},
+    http::{header::USER_AGENT, request::Parts},
+};
 use axum_extra::extract::CookieJar;
 use rusqlite::{named_params, OpenFlags};
 
-use crate::{app_state::AppEnv, database::Database, error::CRRError};
+use crate::{
+    app_state::{AppEnv, AppState},
+    database::Database,
+    error::CRRError,
+};
 
 use super::{permissions::PartialPermissions, DatabasePermissions};
 
@@ -236,6 +245,18 @@ impl std::ops::Deref for AuthDatabase {
 impl std::ops::DerefMut for AuthDatabase {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.conn
+    }
+}
+
+#[async_trait]
+impl FromRequestParts<AppState> for AuthDatabase {
+    type Rejection = CRRError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        AuthDatabase::open(state.env().clone())
     }
 }
 

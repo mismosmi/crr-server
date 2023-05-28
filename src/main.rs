@@ -17,7 +17,7 @@ async fn main() {
 
     let state = AppState::init();
 
-    let auth = AuthDatabase::open(state.env()).expect("Failed to open Auth Database");
+    let auth = AuthDatabase::open(state.env().clone()).expect("Failed to open Auth Database");
 
     auth.apply_migrations()
         .expect("Failed to apply Auth Migrations");

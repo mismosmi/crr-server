@@ -1,4 +1,7 @@
+use std::convert::Infallible;
+
 use axum::{
+    extract::rejection::PathRejection,
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -37,6 +40,14 @@ pub(crate) enum CRRError {
     JsonError(#[from] serde_json::Error),
     #[error("Database {0} is reserved for Internal Purposes")]
     ReservedName(String),
+    #[error("Invalid Path Parameter: {0}")]
+    PathRejection(#[from] PathRejection),
+}
+
+impl From<Infallible> for CRRError {
+    fn from(value: Infallible) -> Self {
+        unreachable!()
+    }
 }
 
 #[derive(Error, Debug, Clone)]

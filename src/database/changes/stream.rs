@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_stream::try_stream;
 use axum::{
     extract::{Path, Query, State},
@@ -9,7 +11,7 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 
 use crate::{
-    auth::AuthDatabase,
+    auth::{AuthDatabase, DatabasePermissions},
     database::Database,
     error::{CRRError, HttpError},
     AppState,
@@ -26,13 +28,14 @@ pub(crate) async fn stream_changes(
     Path(db_name): Path<String>,
     Query(query): Query<StreamChangesQuery>,
     State(state): State<AppState>,
-    cookies: CookieJar,
+    permissions: DatabasePermissions,
 ) -> Result<Sse<impl Stream<Item = Result<Event, HttpError>>>, CRRError> {
-    let permissions = AuthDatabase::open(state.env())?.get_permissions(&cookies, &db_name)?;
-    let env = state.env();
-    let mut subscription = state.change_manager().subscribe(&env, &db_name).await?;
+    let mut subscription = state
+        .change_manager()
+        .subscribe(state.env(), &db_name)
+        .await?;
     let db = Mutex::new(Database::open_readonly(
-        &env,
+        state.env(),
         db_name,
         query.db_version,
         permissions.clone(),
@@ -67,4 +70,57 @@ pub(crate) async fn stream_changes(
         }
 
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        body::HttpBody,
+        extract::{Path, Query, State},
+        response::{IntoResponse, Response},
+    };
+
+    use crate::{
+        app_state::{AppEnv, AppState},
+        auth::DatabasePermissions,
+        database::migrate::tests::setup_foo,
+    };
+
+    use super::stream_changes;
+
+    #[tokio::test]
+    async fn stream_simple_changes() {
+        let state = AppState::test_state();
+
+        setup_foo(state.env());
+
+        state
+            .env()
+            .test_db()
+            .execute("INSERT INTO foo (bar) VALUES ('foo')", [])
+            .unwrap();
+
+        let res: Response = stream_changes(
+            Path(AppEnv::TEST_DB_NAME.to_owned()),
+            Query(super::StreamChangesQuery {
+                site_id: Vec::new(),
+                db_version: 0,
+            }),
+            State(state),
+            DatabasePermissions::Full,
+        )
+        .await
+        .expect("Failed to start stream")
+        .into_response();
+
+        let mut body = res.into_body();
+
+        let event = body
+            .data()
+            .await
+            .expect("Stream was empty")
+            .expect("Received Error");
+
+        assert_eq!(event, "event:change\ndata:");
+    }
 }

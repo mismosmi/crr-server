@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::extract::{Json, State};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use rusqlite::named_params;
@@ -18,7 +20,7 @@ pub(crate) async fn post_token(
     State(state): State<AppState>,
     Json(data): Json<TokenRequestData>,
 ) -> Result<CookieJar, CRRError> {
-    let auth = AuthDatabase::open(state.env())?;
+    let auth = AuthDatabase::open(Arc::clone(state.env()))?;
 
     let user_id: i64 = match data.otp.as_ref() {
         Some(otp) => auth

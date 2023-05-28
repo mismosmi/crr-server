@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::extract::{Json, Path, State};
 use axum_extra::extract::CookieJar;
 
@@ -11,8 +13,8 @@ pub(crate) async fn post_changes(
     State(state): State<AppState>,
     Json(changes): Json<Vec<Changeset>>,
 ) -> Result<(), CRRError> {
-    let permissions =
-        AuthDatabase::open_readonly(state.env())?.get_permissions(&cookies, &db_name)?;
+    let permissions = AuthDatabase::open_readonly(Arc::clone(state.env()))?
+        .get_permissions(&cookies, &db_name)?;
 
     let mut db = Database::open(&state.env(), db_name, permissions)?;
 

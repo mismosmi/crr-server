@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{auth::AuthDatabase, error::CRRError, AppState};
 use axum::extract::{Json, Path, State};
 use axum_extra::extract::CookieJar;
@@ -16,7 +18,8 @@ pub(crate) async fn post_migrate(
     State(state): State<AppState>,
     Json(data): Json<MigratePostData>,
 ) -> Result<(), CRRError> {
-    let permissions = AuthDatabase::open(state.env())?.authorize_migration(&cookies, &db_name)?;
+    let permissions =
+        AuthDatabase::open(Arc::clone(state.env()))?.authorize_migration(&cookies, &db_name)?;
 
     state.change_manager().kill_connection(&db_name).await;
 

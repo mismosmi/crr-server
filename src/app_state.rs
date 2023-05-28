@@ -3,6 +3,8 @@ use std::{
     sync::Arc,
 };
 
+use axum::extract::FromRef;
+
 use crate::database::changes::ChangeManager;
 
 #[derive(Clone)]
@@ -19,8 +21,16 @@ impl AppState {
         }
     }
 
-    pub(crate) fn env(&self) -> Arc<AppEnv> {
-        Arc::clone(&self.env)
+    #[cfg(test)]
+    pub(crate) fn test_state() -> Self {
+        Self {
+            env: AppEnv::test_env(),
+            change_manager: ChangeManager::new(),
+        }
+    }
+
+    pub(crate) fn env(&self) -> &Arc<AppEnv> {
+        &self.env
     }
 
     pub(crate) fn change_manager(&self) -> &ChangeManager {
@@ -43,6 +53,12 @@ impl AppEnv {
 
     pub(crate) fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+}
+
+impl FromRef<AppState> for Arc<AppEnv> {
+    fn from_ref(input: &AppState) -> Self {
+        Arc::clone(input.env())
     }
 }
 

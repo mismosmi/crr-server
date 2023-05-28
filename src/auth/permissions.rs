@@ -1,6 +1,16 @@
 use std::collections::HashMap;
 
-use crate::error::CRRError;
+use axum::{
+    async_trait,
+    extract::{FromRequestParts, Path},
+    http::request::Parts,
+};
+use axum_extra::extract::CookieJar;
+use serde::Deserialize;
+
+use crate::{app_state::AppState, error::CRRError};
+
+use super::AuthDatabase;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub(crate) struct PartialPermissions {
@@ -247,6 +257,28 @@ impl AllowedTables {
             Self::All => false,
             Self::Some(tables) => tables.is_empty(),
         }
+    }
+}
+
+#[derive(Deserialize)]
+struct PathParams {
+    db_name: String,
+}
+
+#[async_trait]
+impl FromRequestParts<AppState> for DatabasePermissions {
+    type Rejection = CRRError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let cookies = CookieJar::from_request_parts(parts, state).await?;
+        let PathParams { db_name } = Path::<PathParams>::from_request_parts(parts, state)
+            .await?
+            .0;
+        let auth = AuthDatabase::from_request_parts(parts, state).await?;
+        auth.get_permissions(&cookies, &db_name)
     }
 }
 

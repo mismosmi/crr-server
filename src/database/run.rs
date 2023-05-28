@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, State},
     Json,
@@ -29,8 +31,8 @@ pub(crate) async fn post_run(
     State(state): State<AppState>,
     Json(data): Json<RunPostData>,
 ) -> Result<axum::Json<RunPostResponse>, CRRError> {
-    let permissions =
-        AuthDatabase::open_readonly(state.env())?.get_permissions(&cookies, &db_name)?;
+    let permissions = AuthDatabase::open_readonly(Arc::clone(state.env()))?
+        .get_permissions(&cookies, &db_name)?;
 
     let db = Database::open(&state.env(), db_name.clone(), permissions)?;
 
