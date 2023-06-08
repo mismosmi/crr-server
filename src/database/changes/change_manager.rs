@@ -4,7 +4,7 @@ use tokio::sync::broadcast::{self, error::SendError};
 
 use crate::{app_state::AppEnv, auth::DatabasePermissions, database::Database, error::CRRError};
 
-use super::{DatabaseHandle, Message, Subscription};
+use super::{ChangesIter, Changeset, DatabaseHandle, Message, Subscription, CHANGE_BUFFER_SIZE};
 
 #[derive(Clone)]
 pub(crate) struct ChangeManager(
@@ -89,7 +89,8 @@ impl ChangeManager {
         let hook_signal_sender = signal_sender.downgrade();
 
         database.update_hook(Some(
-            move |_action, _arg1: &'_ str, _arg2: &'_ str, _rowid| {
+            move |_action, _arg1: &'_ str, _arg2: &'_ str, rowid| {
+                tracing::debug!("update hook triggered for row {}", rowid);
                 if let Some(sender) = hook_signal_sender.upgrade() {
                     let _ = sender.try_send(());
                 }
@@ -136,5 +137,53 @@ impl ChangeManager {
                 db_name,
             );
         }
+    }
+}
+
+impl Database {
+    pub(crate) fn all_changes<'d>(
+        &'d mut self,
+    ) -> ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + 'd> {
+        ChangesIter::new(move || {
+            if !self.permissions().full() {
+                return Err(CRRError::Unauthorized(
+                    "Full access is required to listen to all changes".to_owned(),
+                ));
+            }
+
+            let query = "
+                SELECT \"table\", pk, cid, val, col_version, db_version, COALESCE(site_id, crsql_siteid())
+                FROM crsql_changes
+                WHERE db_version > ?
+            ";
+
+            let mut buffer = Vec::<Changeset>::new();
+            let mut has_next_page = false;
+
+            {
+                let mut buffer_size = 0usize;
+                let authorized = self.disable_authorization();
+                let mut stmt = authorized.prepare(query)?;
+                let mut rows = stmt.query([&authorized.db_version()])?;
+
+                while let Some(row) = rows.next()? {
+                    let changeset: Changeset = row.try_into()?;
+                    buffer_size += changeset.size();
+
+                    buffer.push(changeset);
+
+                    if buffer_size > CHANGE_BUFFER_SIZE {
+                        has_next_page = true;
+                        break;
+                    }
+                }
+            }
+
+            if let Some(changeset) = buffer.last() {
+                self.set_db_version(changeset.db_version());
+            }
+
+            Ok((buffer, has_next_page))
+        })
     }
 }

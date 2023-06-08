@@ -45,7 +45,7 @@ pub(crate) enum CRRError {
 }
 
 impl From<Infallible> for CRRError {
-    fn from(value: Infallible) -> Self {
+    fn from(_value: Infallible) -> Self {
         unreachable!()
     }
 }

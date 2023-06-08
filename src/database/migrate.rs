@@ -3,6 +3,9 @@ use std::sync::Arc;
 use crate::{auth::AuthDatabase, error::CRRError, AppState};
 use axum::extract::{Json, Path, State};
 use axum_extra::extract::CookieJar;
+use lazy_static::lazy_static;
+use regex::Regex;
+use rusqlite::Connection;
 use serde::Deserialize;
 
 use super::Database;
@@ -31,7 +34,7 @@ pub(crate) async fn post_migrate(
 }
 
 impl Database {
-    fn apply_migrations(&mut self, migrations: &Vec<String>) -> Result<(), CRRError> {
+    pub(crate) fn apply_migrations(&mut self, migrations: &Vec<String>) -> Result<(), CRRError> {
         if !self.permissions().full() {
             return Err(CRRError::Unauthorized(
                 "User must be authorized with full access to the database to apply migrations"
@@ -39,31 +42,93 @@ impl Database {
             ));
         }
 
+        let savepoint = self.savepoint()?;
+
         for migration in migrations {
-            self.apply_migration(migration)?;
+            Self::apply_migration(&savepoint, migration)?;
         }
+
+        savepoint.commit()?;
+
         Ok(())
     }
 
-    fn apply_migration(&mut self, sql: &str) -> Result<(), CRRError> {
-        tracing::info!("Database \"{}\": Applying migration", self.name());
+    fn apply_migration(conn: &Connection, sql: &str) -> Result<(), CRRError> {
+        lazy_static! {
+            static ref RE_CREATE: Regex = Regex::new(r"/CREATE TABLE\w(.+)\w\(/i")
+                .expect("Failed to compile create table regex");
+            static ref RE_ALTER: Regex = Regex::new(r"/ALTER TABLE\w(.+)\w/i")
+                .expect("Failed to compile create table regex");
+        }
 
-        // TODO auto-apply crsqlite stuff
-        self.execute_batch(sql)?;
+        match MigrationMode::detect(sql) {
+            MigrationMode::Alter(table_name) => {
+                conn.query_row("SELECT crsql_begin_alter(?)", [&table_name], |_| Ok(()))?;
+                conn.execute_batch(sql)?;
+                conn.query_row("SELECT crsql_commit_alter(?)", [table_name], |_| Ok(()))?;
+            }
+            MigrationMode::Create(table_name) => {
+                conn.execute_batch(sql)?;
+                conn.query_row("SELECT crsql_as_crr(?)", [table_name], |_| Ok(()))?;
+            }
+            MigrationMode::Other => {
+                conn.execute_batch(sql)?;
+            }
+        }
 
         Ok(())
     }
 }
 
+#[derive(PartialEq, Debug)]
+enum MigrationMode {
+    Create(String),
+    Alter(String),
+    Other,
+}
+
+impl MigrationMode {
+    fn detect(sql: &str) -> Self {
+        lazy_static! {
+            static ref RE_CREATE: Regex =
+                Regex::new("CREATE TABLE \"(.+)\"").expect("Failed to compile create table regex");
+            static ref RE_ALTER: Regex =
+                Regex::new("ALTER TABLE \"(.+)\"").expect("Failed to compile create table regex");
+        }
+
+        if let Some(altered) = RE_ALTER.captures(sql) {
+            Self::Alter(altered[1].to_owned())
+        } else if let Some(created) = RE_CREATE.captures(sql) {
+            Self::Create(created[1].to_owned())
+        } else {
+            Self::Other
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::app_state::AppEnv;
+    use crate::{app_state::AppEnv, database::migrate::MigrationMode};
+
+    #[test]
+    fn detect_migration_mode() {
+        assert_eq!(
+            MigrationMode::detect("CREATE TABLE \"foo\" (value TEXT)"),
+            MigrationMode::Create("foo".to_owned())
+        );
+        assert_eq!(
+            MigrationMode::detect("ALTER TABLE \"foo\" ADD COLUMN value TEXT"),
+            MigrationMode::Alter("foo".to_owned())
+        );
+        assert_eq!(
+            MigrationMode::detect("INSERT INTO \"foo\" (value) VALUES ('test')"),
+            MigrationMode::Other
+        );
+    }
 
     pub(crate) fn setup_foo(env: &AppEnv) {
-        let migrations = vec![
-            "CREATE TABLE foo (id INTEGER PRIMARY KEY, bar TEXT); SELECT crsql_as_crr('foo');"
-                .to_string(),
-        ];
+        let migrations =
+            vec!["CREATE TABLE \"foo\" (id INTEGER PRIMARY KEY, bar TEXT)".to_string()];
 
         env.test_db()
             .apply_migrations(&migrations)

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{database::Value, error::CRRError};
 
-#[derive(Clone, Deserialize, Serialize, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq)]
 pub(crate) struct Changeset {
     table: String,
     pk: Value,

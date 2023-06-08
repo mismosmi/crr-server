@@ -2,17 +2,10 @@ use std::path::PathBuf;
 
 use rusqlite::{
     hooks::{AuthAction, AuthContext, Authorization},
-    named_params, params_from_iter, LoadExtensionGuard, ToSql,
+    LoadExtensionGuard,
 };
 
-use crate::{
-    app_state::AppEnv,
-    auth::{AllowedTables, DatabasePermissions},
-    database::changes::Changeset,
-    error::CRRError,
-};
-
-const CHANGE_BUFFER_SIZE: usize = 1_000_000;
+use crate::{app_state::AppEnv, auth::DatabasePermissions, error::CRRError};
 
 pub(crate) struct Database {
     conn: rusqlite::Connection,
@@ -53,7 +46,7 @@ impl Database {
             ext = ext
         );
 
-        println!("load extension {}", extension_name);
+        tracing::info!("load extension {}", extension_name);
 
         unsafe {
             let _guard = LoadExtensionGuard::new(conn)?;
@@ -154,170 +147,12 @@ impl Database {
         self.db_version
     }
 
-    pub(crate) fn changes<'d, 's>(
-        &'d mut self,
-        site_id: &'s Vec<u8>,
-    ) -> Result<ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + 'd>, CRRError>
-    where
-        's: 'd,
-    {
-        let readable_tables = self.permissions.readable_tables();
-
-        if readable_tables.is_empty() {
-            return Err(CRRError::Unauthorized(
-                "User is not authorized to read database".to_string(),
-            ));
-        }
-
-        let query = match &readable_tables {
-            AllowedTables::All => "
-                SELECT \"table\", pk, cid, val, col_version, db_version, site_id
-                FROM crsql_changes
-                WHERE db_version > ?
-                AND site_id IS NOT ?
-            "
-            .to_string(),
-            AllowedTables::Some(table_names) => format!(
-                "
-                    SELECT \"table\", pk, cid, val, col_version, db_version, site_id
-                    FROM crsql_changes
-                    WHERE db_version > ?
-                    AND site_id IS NOT ?
-                    AND \"table\" IN ({})
-                ",
-                vec!["?"].repeat(table_names.len()).join(", ")
-            ),
-        };
-
-        Ok(ChangesIter::new(move || {
-            let mut buffer = Vec::<Changeset>::new();
-            let mut has_next_page = false;
-
-            {
-                let mut buffer_size = 0usize;
-
-                let mut stmt = self.prepare(&query)?;
-
-                let mut params: Vec<Box<dyn ToSql>> = Vec::new();
-
-                params.push(Box::new(self.db_version));
-                params.push(Box::new(site_id));
-
-                if let AllowedTables::Some(table_names) = &readable_tables {
-                    for table_name in table_names {
-                        params.push(Box::new(table_name));
-                    }
-                }
-
-                let mut rows = stmt.query(params_from_iter(params.iter()))?;
-
-                while let Ok(Some(row)) = rows.next() {
-                    let changeset: Changeset = row.try_into()?;
-
-                    buffer_size += changeset.size();
-
-                    buffer.push(changeset);
-
-                    if buffer_size > CHANGE_BUFFER_SIZE {
-                        has_next_page = true;
-                        break;
-                    }
-                }
-            }
-
-            if let Some(changeset) = buffer.last() {
-                self.db_version = changeset.db_version();
-            }
-
-            Ok((buffer, has_next_page))
-        }))
+    pub(crate) fn set_db_version(&mut self, db_version: i64) {
+        self.db_version = db_version;
     }
 
-    pub(crate) fn all_changes<'d>(
-        &'d mut self,
-    ) -> ChangesIter<impl FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + 'd> {
-        ChangesIter::new(move || {
-            if !self.permissions.full() {
-                return Err(CRRError::Unauthorized(
-                    "Full access is required to listen to all changes".to_owned(),
-                ));
-            }
-
-            let query = "
-                SELECT \"table\", pk, cid, val, col_version, db_version, COALESCE(site_id, crsql_siteid())
-                FROM crsql_changes
-                WHERE db_version > ?
-            ";
-
-            let mut buffer = Vec::<Changeset>::new();
-            let mut has_next_page = false;
-
-            {
-                let mut buffer_size = 0usize;
-                let mut stmt = self.conn.prepare(query)?;
-                let mut rows = stmt.query([&self.db_version])?;
-
-                while let Some(row) = rows.next()? {
-                    let changeset: Changeset = row.try_into()?;
-                    buffer_size += changeset.size();
-
-                    buffer.push(changeset);
-
-                    if buffer_size > CHANGE_BUFFER_SIZE {
-                        has_next_page = true;
-                        break;
-                    }
-                }
-            }
-
-            if let Some(changeset) = buffer.last() {
-                self.db_version = changeset.db_version();
-            }
-
-            Ok((buffer, has_next_page))
-        })
-    }
-
-    pub(crate) fn apply_changes(&mut self, changes: Vec<Changeset>) -> Result<(), CRRError> {
-        let query = "
-            INSERT INTO crsql_changes (\"table\", pk, cid, val, col_version, db_version, site_id)
-            VALUES (:table, :pk, :cid, :val, :col_version, :db_version, :site_id)
-        ";
-
-        let mut stmt = self.prepare(query)?;
-
-        for changeset in changes {
-            if changeset.cid().is_none() && !self.permissions.delete_table(changeset.table()) {
-                return Err(CRRError::Unauthorized(format!(
-                    "User is not authorized to delete from table {}",
-                    changeset.table()
-                )));
-            } else if changeset.col_version() == 1
-                && !self.permissions.insert_table(changeset.table())
-            {
-                return Err(CRRError::Unauthorized(format!(
-                    "User is not authorized to insert into table {}",
-                    changeset.table()
-                )));
-            } else if !self.permissions.update_table(changeset.table()) {
-                return Err(CRRError::Unauthorized(format!(
-                    "User is not authorized to update table {}",
-                    changeset.table()
-                )));
-            }
-
-            stmt.insert(named_params! {
-                ":table": changeset.table(),
-                ":pk": changeset.pk(),
-                ":cid": changeset.cid(),
-                ":val": changeset.val(),
-                ":col_version": changeset.col_version(),
-                ":db_version": changeset.db_version(),
-                ":site_id": changeset.site_id(),
-            })?;
-        }
-
-        Ok(())
+    pub(crate) fn disable_authorization<'d>(&'d mut self) -> AuthorizedDatabaseHandle<'d> {
+        AuthorizedDatabaseHandle::new(self)
     }
 }
 
@@ -329,61 +164,44 @@ impl std::ops::Deref for Database {
     }
 }
 
+impl std::ops::DerefMut for Database {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.conn
+    }
+}
+
 impl std::ops::Drop for Database {
     fn drop(&mut self) {
+        self.authorizer(None::<for<'r> fn(AuthContext<'r>) -> _>);
         let _err = self.execute("SELECT crsql_finalize()", []);
     }
 }
 
-pub(crate) struct ChangesIter<F>
-where
-    F: FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + Send,
-{
-    load_page: std::sync::Mutex<F>,
-    current_page: <Vec<Changeset> as IntoIterator>::IntoIter,
-    has_next_page: bool,
-}
+pub(crate) struct AuthorizedDatabaseHandle<'d>(&'d mut Database);
 
-impl<F> ChangesIter<F>
-where
-    F: FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + Send,
-{
-    fn new(load_page: F) -> Self {
-        Self {
-            load_page: std::sync::Mutex::new(load_page),
-            current_page: Vec::new().into_iter(),
-            has_next_page: true,
-        }
+impl<'d> AuthorizedDatabaseHandle<'d> {
+    fn new(db: &'d mut Database) -> Self {
+        db.authorizer(None::<for<'r> fn(AuthContext<'r>) -> Authorization>);
+        Self(db)
     }
 }
 
-impl<F> Iterator for ChangesIter<F>
-where
-    F: FnMut() -> Result<(Vec<Changeset>, bool), CRRError> + Send,
-{
-    type Item = Result<Changeset, CRRError>;
+impl<'d> std::ops::Deref for AuthorizedDatabaseHandle<'d> {
+    type Target = Database;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(changeset) = self.current_page.next() {
-            return Some(Ok(changeset));
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
-        if self.has_next_page {
-            match self
-                .load_page
-                .lock()
-                .map_err(|_| CRRError::PoisonedLockError("ChangesIter::next"))
-                .and_then(|mut lock| lock())
-            {
-                Ok((page, has_next_page)) => {
-                    self.current_page = page.into_iter();
-                    self.has_next_page = has_next_page;
-                    return self.current_page.next().map(|changeset| Ok(changeset));
-                }
-                Err(error) => return Some(Err(error)),
-            }
-        }
+impl<'d> std::ops::DerefMut for AuthorizedDatabaseHandle<'d> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
-        None
+impl<'d> std::ops::Drop for AuthorizedDatabaseHandle<'d> {
+    fn drop(&mut self) {
+        Database::set_authorizer(&self.0.conn, self.0.permissions.clone())
     }
 }

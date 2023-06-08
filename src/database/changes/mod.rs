@@ -1,4 +1,5 @@
 mod change_manager;
+mod changes_iter;
 mod changeset;
 mod database_handle;
 mod message;
@@ -6,11 +7,14 @@ mod post;
 mod stream;
 
 pub(crate) use change_manager::ChangeManager;
+pub(crate) use changes_iter::ChangesIter;
 pub(crate) use changeset::Changeset;
 pub(crate) use database_handle::{DatabaseHandle, Subscription};
 pub(crate) use message::Message;
 pub(crate) use post::post_changes;
 pub(crate) use stream::stream_changes;
+
+const CHANGE_BUFFER_SIZE: usize = 1_000_000;
 
 #[cfg(test)]
 mod tests {

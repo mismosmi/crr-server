@@ -1,10 +1,6 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
-use axum::{
-    async_trait,
-    extract::{FromRequestParts, State},
-    http::{header::USER_AGENT, request::Parts},
-};
+use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
 use axum_extra::extract::CookieJar;
 use rusqlite::{named_params, OpenFlags};
 
@@ -253,7 +249,7 @@ impl FromRequestParts<AppState> for AuthDatabase {
     type Rejection = CRRError;
 
     async fn from_request_parts(
-        parts: &mut Parts,
+        _parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         AuthDatabase::open(state.env().clone())

@@ -1376,6 +1376,7 @@ dependencies = [
  "base64",
  "dotenv",
  "futures",
+ "lazy_static",
  "lettre",
  "nanoid",
  "regex",
