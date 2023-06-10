@@ -29,7 +29,7 @@ async fn main() {
 
     tracing::info!("Starting server...");
     Server::bind(
-        &"0.0.0.0:3000"
+        &"0.0.0.0:6839"
             .parse()
             .expect("Failed to parse bind address"),
     )
