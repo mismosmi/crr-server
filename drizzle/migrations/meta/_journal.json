@@ -1,0 +1,13 @@
+{
+  "version": "5",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1686424866926,
+      "tag": "0000_daily_hellfire_club",
+      "breakpoints": false
+    }
+  ]
+}
