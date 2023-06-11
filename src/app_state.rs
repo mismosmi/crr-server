@@ -14,9 +14,9 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
-    pub(crate) fn init() -> Self {
+    pub(crate) fn init(disable_validation: bool) -> Self {
         Self {
-            env: Arc::new(AppEnv::load()),
+            env: Arc::new(AppEnv::load(disable_validation)),
             change_manager: ChangeManager::new(),
         }
     }
@@ -40,21 +40,27 @@ impl AppState {
 
 pub(crate) struct AppEnv {
     data_dir: PathBuf,
+    disable_validation: bool,
     admin_token: Option<String>,
 }
 
 impl AppEnv {
-    fn load() -> Self {
+    fn load(disable_validation: bool) -> Self {
         Self {
             data_dir: PathBuf::from(
                 std::env::var("CRR_DATA_DIR").unwrap_or_else(|_| "./data".to_owned()),
             ),
+            disable_validation,
             admin_token: std::env::var("CRR_ADMIN_TOKEN").ok(),
         }
     }
 
     pub(crate) fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+
+    pub(crate) fn disable_validation(&self) -> bool {
+        self.disable_validation
     }
 
     pub(crate) fn admin_token(&self) -> &Option<String> {
@@ -82,6 +88,7 @@ impl AppEnv {
 
         let this = Arc::new(Self {
             data_dir,
+            disable_validation: false,
             admin_token: None,
         });
         let auth = AuthDatabase::open(Arc::clone(&this)).expect("Failed to open AuthDatabase");

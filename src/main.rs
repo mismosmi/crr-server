@@ -8,6 +8,13 @@ mod serde_base64;
 pub(crate) use app_state::AppState;
 use auth::AuthDatabase;
 use axum::{Router, Server};
+use clap::Parser;
+
+#[derive(Parser)]
+struct Cli {
+    #[arg(long)]
+    disable_validation: bool,
+}
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +22,9 @@ async fn main() {
 
     dotenv::dotenv().expect("Failed to read environment");
 
-    let state = AppState::init();
+    let cli = Cli::parse();
+
+    let state = AppState::init(!cli.disable_validation);
 
     let auth = AuthDatabase::open(state.env().clone()).expect("Failed to open Auth Database");
 
