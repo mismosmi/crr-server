@@ -10,7 +10,7 @@ use crate::{
     error::CRRError,
 };
 
-use super::{permissions::PartialPermissions, DatabasePermissions};
+use super::{permissions::PartialPermissions, DatabasePermissions, COOKIE_NAME};
 
 pub(crate) struct AuthDatabase {
     conn: rusqlite::Connection,
@@ -50,11 +50,15 @@ impl AuthDatabase {
         Ok(())
     }
 
-    fn authenticate_user(&self, cookies: &CookieJar) -> Result<i64, CRRError> {
-        let id: i64 = self.prepare("SELECT user_id FROM tokens WHERE token = :token AND expires > 'now'")?
-            .query_row(named_params! {
-                ":token": cookies.get(super::COOKIE_NAME).ok_or(CRRError::Unauthorized("No Token Found".to_string()))?.value()
-            }, |row| row.get(0))?;
+    fn authenticate_user(&self, token: &str) -> Result<i64, CRRError> {
+        let id: i64 = self
+            .prepare("SELECT user_id FROM tokens WHERE token = :token AND expires > 'now'")?
+            .query_row(
+                named_params! {
+                    ":token": token
+                },
+                |row| row.get(0),
+            )?;
 
         Ok(id)
     }
@@ -138,7 +142,16 @@ impl AuthDatabase {
             return Err(CRRError::ReservedName(db_name.to_owned()));
         }
 
-        let user_id = self.authenticate_user(cookies)?;
+        let token = cookies
+            .get(COOKIE_NAME)
+            .ok_or(CRRError::Unauthorized("No Token found".to_string()))?
+            .value();
+
+        if Some(token) == self.env.admin_token().as_deref() {
+            return Ok(DatabasePermissions::Full);
+        }
+
+        let user_id = self.authenticate_user(token)?;
 
         let permissions = self.get_permissions_for_user(user_id, db_name)?;
 
@@ -157,7 +170,16 @@ impl AuthDatabase {
         cookies: &CookieJar,
         db_name: &str,
     ) -> Result<DatabasePermissions, CRRError> {
-        let user_id = self.authenticate_user(cookies)?;
+        let token = cookies
+            .get(COOKIE_NAME)
+            .ok_or(CRRError::Unauthorized("No Token found".to_string()))?
+            .value();
+
+        if Some(token) == self.env.admin_token().as_deref() {
+            return Ok(DatabasePermissions::Full);
+        }
+
+        let user_id = self.authenticate_user(token)?;
 
         match self.get_permissions(cookies, db_name) {
             Err(CRRError::Unauthorized(message)) => {

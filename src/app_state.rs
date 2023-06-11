@@ -40,6 +40,7 @@ impl AppState {
 
 pub(crate) struct AppEnv {
     data_dir: PathBuf,
+    admin_token: Option<String>,
 }
 
 impl AppEnv {
@@ -48,11 +49,16 @@ impl AppEnv {
             data_dir: PathBuf::from(
                 std::env::var("CRR_DATA_DIR").unwrap_or_else(|_| "./data".to_owned()),
             ),
+            admin_token: std::env::var("CRR_ADMIN_TOKEN").ok(),
         }
     }
 
     pub(crate) fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+
+    pub(crate) fn admin_token(&self) -> &Option<String> {
+        &self.admin_token
     }
 }
 
@@ -74,7 +80,10 @@ impl AppEnv {
 
         let _err = std::fs::create_dir_all(&data_dir);
 
-        let this = Arc::new(Self { data_dir });
+        let this = Arc::new(Self {
+            data_dir,
+            admin_token: None,
+        });
         let auth = AuthDatabase::open(Arc::clone(&this)).expect("Failed to open AuthDatabase");
 
         auth.apply_migrations()

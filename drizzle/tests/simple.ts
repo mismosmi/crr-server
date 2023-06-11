@@ -14,10 +14,12 @@ describe("Basic Functionality", () => {
 
     await db
       .insert(table)
-      .values({ id: "first", val: "This is the first row" });
+      .values({ id: "first", val: "This is the first row" })
+      .onConflictDoNothing()
+      .run();
 
     const { val } = await db.select({ val: table.val }).from(table).get();
 
-    expect(val).toBe("This is the first row");
+    expect(val).toStrictEqual(["This is the first row"]);
   });
 });

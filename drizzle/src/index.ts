@@ -11,6 +11,7 @@ export function createClient(url: string) {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
+          Cookie: "CRR_TOKEN=tok",
         },
         body: JSON.stringify({
           sql,
@@ -61,6 +62,7 @@ export function createMigratorClient(url: string) {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        Cookie: "CRR_TOKEN=tok",
       },
       body: JSON.stringify({
         queries,
