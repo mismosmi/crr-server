@@ -288,6 +288,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5827cebf4670468b8772dd191856768aedcb1b0278a04f989f7766351917b9dc"
 
 [[package]]
+name = "crr-server"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "axum",
+ "axum-extra",
+ "base64",
+ "clap",
+ "dotenv",
+ "futures",
+ "lazy_static",
+ "lettre",
+ "nanoid",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "dotenv"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1529,31 +1554,6 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
-
-[[package]]
-name = "vlcn-server"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "axum",
- "axum-extra",
- "base64",
- "clap",
- "dotenv",
- "futures",
- "lazy_static",
- "lettre",
- "nanoid",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror",
- "time",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "want"
