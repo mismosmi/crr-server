@@ -30,7 +30,6 @@ impl Database {
         let mut stmt = authorized.prepare(query)?;
 
         for changeset in changes {
-            dbg!(&changeset);
             if changeset.cid() == Some("__crsql_del") {
                 if !authorized.permissions().delete_table(changeset.table()) {
                     return Err(CRRError::Unauthorized(format!(
@@ -177,6 +176,7 @@ mod tests {
     async fn post_changes_with_insert_permissions() {
         let state = AppState::test_state();
         setup_foo(state.env());
+
         let permissions = DatabasePermissions::Partial {
             database: PartialPermissions {
                 read: false,
@@ -233,6 +233,7 @@ mod tests {
     async fn post_changes_with_update_permissions() {
         let state = AppState::test_state();
         setup_foo(state.env());
+
         let permissions = DatabasePermissions::Partial {
             database: PartialPermissions {
                 read: false,
@@ -291,6 +292,7 @@ mod tests {
     async fn post_changes_with_delete_permissions() {
         let state = AppState::test_state();
         setup_foo(state.env());
+
         let permissions = DatabasePermissions::Partial {
             database: PartialPermissions {
                 read: false,

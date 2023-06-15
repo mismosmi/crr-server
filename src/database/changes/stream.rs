@@ -183,11 +183,11 @@ mod tests {
     fn read_simple_changes() {
         let env = AppEnv::test_env();
         setup_foo(&env);
-        env.test_db()
-            .execute("INSERT INTO foo (bar) VALUES ('foo')", [])
-            .unwrap();
 
         let mut db = env.test_db();
+
+        db.execute("INSERT INTO foo (bar) VALUES ('foo')", [])
+            .unwrap();
 
         let changes = db
             .changes(&Vec::from(SITE_ID))

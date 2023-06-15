@@ -12,7 +12,7 @@ use crate::{
 
 use super::{permissions::PartialPermissions, DatabasePermissions, COOKIE_NAME};
 
-pub(crate) struct AuthDatabase {
+pub struct AuthDatabase {
     conn: rusqlite::Connection,
     env: Arc<AppEnv>,
 }
@@ -26,7 +26,7 @@ impl AuthDatabase {
         path
     }
 
-    pub(crate) fn open(env: Arc<AppEnv>) -> Result<Self, CRRError> {
+    pub fn open(env: Arc<AppEnv>) -> Result<Self, CRRError> {
         Ok(Self {
             conn: rusqlite::Connection::open(Self::file_path(&env))?,
             env,
@@ -43,7 +43,7 @@ impl AuthDatabase {
         })
     }
 
-    pub(crate) fn apply_migrations(&self) -> Result<(), CRRError> {
+    pub fn apply_migrations(&self) -> Result<(), CRRError> {
         tracing::info!("Applying metadata migrations");
         self.execute_batch(&fs::read_to_string("./auth_migrations.sql")?)?;
 

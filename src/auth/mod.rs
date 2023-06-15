@@ -9,7 +9,7 @@ mod otp;
 mod permissions;
 mod token;
 
-pub(crate) use database::AuthDatabase;
+pub use database::AuthDatabase;
 pub(crate) use permissions::{AllowedTables, DatabasePermissions};
 
 #[cfg(test)]

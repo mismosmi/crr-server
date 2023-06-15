@@ -11,7 +11,7 @@ use serde_json::json;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub(crate) enum CRRError {
+pub enum CRRError {
     #[error("Database Error: {0}")]
     DatabaseError(#[from] rusqlite::Error),
     #[error("Parser Error: {0}")]

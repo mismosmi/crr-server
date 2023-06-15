@@ -1,14 +1,6 @@
-mod app_state;
-mod auth;
-mod database;
-pub(crate) mod error;
-pub(crate) mod mail;
-mod serde_base64;
-
-pub(crate) use app_state::AppState;
-use auth::AuthDatabase;
-use axum::{Router, Server};
+use axum::Server;
 use clap::Parser;
+pub(crate) use crr_server::{app_state::AppState, auth::AuthDatabase, router};
 
 #[derive(Parser)]
 struct Cli {
@@ -31,10 +23,7 @@ async fn main() {
     auth.apply_migrations()
         .expect("Failed to apply Auth Migrations");
 
-    let app = Router::<AppState>::new()
-        .nest("/auth", auth::router())
-        .nest("/db", database::router())
-        .with_state(state);
+    let app = router().with_state(state);
 
     tracing::info!("Starting server...");
     Server::bind(

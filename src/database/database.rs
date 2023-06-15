@@ -7,7 +7,7 @@ use rusqlite::{
 
 use crate::{app_state::AppEnv, auth::DatabasePermissions, error::CRRError};
 
-pub(crate) struct Database {
+pub struct Database {
     conn: rusqlite::Connection,
     name: String,
     db_version: i64,

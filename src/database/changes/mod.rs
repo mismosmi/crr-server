@@ -19,7 +19,7 @@ const CHANGE_BUFFER_SIZE: usize = 1_000_000;
 #[cfg(test)]
 mod tests {
     use crate::{
-        app_state::AppEnv,
+        app_state::{AppEnv, AppState},
         database::{
             changes::{change_manager::ChangeManager, Changeset},
             migrate::tests::setup_foo,
@@ -75,17 +75,19 @@ mod tests {
 
     #[tokio::test]
     async fn react_to_changes() {
-        let env = AppEnv::test_env();
-        setup_foo(&env);
+        let state = AppState::test_state();
+        setup_foo(state.env());
 
         let change_manager = ChangeManager::new();
 
         let mut sub = change_manager
-            .subscribe(&env, AppEnv::TEST_DB_NAME)
+            .subscribe(state.env(), AppEnv::TEST_DB_NAME)
             .await
             .expect("Failed to set up subscription");
 
-        env.test_db()
+        state
+            .env()
+            .test_db()
             .execute("INSERT INTO foo (bar) VALUES (?)", ["baz"])
             .expect("Failed to insert data");
 

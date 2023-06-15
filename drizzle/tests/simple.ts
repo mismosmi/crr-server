@@ -4,13 +4,17 @@ import { migrate } from "drizzle-orm/sqlite-proxy/migrator";
 import { table } from "../schema";
 
 describe("Basic Functionality", () => {
-  const url = "http://127.0.0.1:6839/db/test-basic";
-  const db = drizzle(createClient(url));
+  const url = `${process.env.CRR_SERVER_URL}/db/test-basic`;
+  const db = drizzle(createClient(url, process.env.CRR_SERVER_TOKEN!));
 
   it("runs migrations", async () => {
-    await migrate(db, createMigratorClient(url), {
-      migrationsFolder: "migrations",
-    });
+    await migrate(
+      db,
+      createMigratorClient(url, process.env.CRR_SERVER_TOKEN!),
+      {
+        migrationsFolder: "migrations",
+      }
+    );
 
     await db
       .insert(table)

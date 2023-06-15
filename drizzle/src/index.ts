@@ -1,4 +1,4 @@
-export function createClient(url: string) {
+export function createClient(url: string, token: string) {
   return async function CRRClient(
     sql: string,
     params: any,
@@ -11,7 +11,7 @@ export function createClient(url: string) {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
-          Cookie: "CRR_TOKEN=tok",
+          Cookie: `CRR_TOKEN=${token}`,
         },
         body: JSON.stringify({
           sql,
@@ -55,14 +55,14 @@ export function createClient(url: string) {
   };
 }
 
-export function createMigratorClient(url: string) {
+export function createMigratorClient(url: string, token: string) {
   return async function CRRMigratorClient(queries: string[]) {
     const res = await fetch(`${url}/migrate`, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Cookie: "CRR_TOKEN=tok",
+        Cookie: `CRR_TOKEN=${token}`,
       },
       body: JSON.stringify({
         queries,
