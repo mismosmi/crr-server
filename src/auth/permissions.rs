@@ -277,7 +277,7 @@ impl FromRequestParts<AppState> for DatabasePermissions {
         let PathParams { db_name } = Path::<PathParams>::from_request_parts(parts, state)
             .await?
             .0;
-        let auth = AuthDatabase::from_request_parts(parts, state).await?;
+        let auth = AuthDatabase::open_readonly(state.env().clone())?;
         auth.get_permissions(&cookies, &db_name)
     }
 }

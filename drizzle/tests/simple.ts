@@ -8,6 +8,7 @@ describe("Basic Functionality", () => {
   const db = drizzle(createClient(url, process.env.CRR_SERVER_TOKEN!));
 
   it("runs migrations", async () => {
+    console.log("migrate");
     await migrate(
       db,
       createMigratorClient(url, process.env.CRR_SERVER_TOKEN!),
@@ -16,14 +17,17 @@ describe("Basic Functionality", () => {
       }
     );
 
+    console.log("insert");
     await db
       .insert(table)
       .values({ id: "first", val: "This is the first row" })
       .onConflictDoNothing()
       .run();
 
+    console.log("select");
     const { val } = await db.select({ val: table.val }).from(table).get();
 
+    console.log("assert");
     expect(val).toStrictEqual(["This is the first row"]);
   });
 });

@@ -1,14 +1,11 @@
-use std::sync::Arc;
-
 use axum::{
     extract::{Path, State},
     Json,
 };
-use axum_extra::extract::CookieJar;
 use rusqlite::params_from_iter;
 use serde::{Deserialize, Serialize};
 
-use crate::{app_state::AppState, auth::AuthDatabase, error::CRRError};
+use crate::{app_state::AppState, auth::DatabasePermissions, error::CRRError};
 
 use super::{Database, Value};
 
@@ -26,18 +23,17 @@ pub(crate) struct RunPostResponse {
 }
 
 pub(crate) async fn post_run(
-    cookies: CookieJar,
     Path(db_name): Path<String>,
     State(state): State<AppState>,
+    permissions: DatabasePermissions,
     Json(data): Json<RunPostData>,
 ) -> Result<axum::Json<RunPostResponse>, CRRError> {
-    let permissions = AuthDatabase::open_readonly(Arc::clone(state.env()))?
-        .get_permissions(&cookies, &db_name)?;
-
     let db = Database::open(&state.env(), db_name.clone(), permissions)?;
 
     let mut stmt = db.prepare(&data.sql)?;
     let column_count = stmt.column_count();
+
+    tracing::info!("{} {}", &data.method, &data.sql);
 
     match &data.method[..] {
         "run" => {
@@ -84,5 +80,41 @@ pub(crate) async fn post_run(
                 changes: None,
             }))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        extract::{Path, State},
+        Json,
+    };
+
+    use crate::{
+        app_state::{AppEnv, AppState},
+        auth::DatabasePermissions,
+    };
+
+    use super::{post_run, RunPostData};
+
+    #[tokio::test]
+    async fn post_create_table() {
+        let state = AppState::test_state();
+
+        let Json(res) = post_run(
+            Path(AppEnv::TEST_DB_NAME.to_string()),
+            State(state.clone()),
+            DatabasePermissions::Full,
+            Json(RunPostData {
+                sql: "CREATE TABLE test (val TEXT PRIMARY KEY)".to_owned(),
+                params: Vec::new(),
+                method: "run".to_owned(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(res.rows.is_empty());
+        assert_eq!(res.changes, Some(1));
     }
 }

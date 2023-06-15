@@ -3,7 +3,8 @@ export function createClient(url: string, token: string) {
     sql: string,
     params: any,
     method: "run" | "all" | "values" | "get"
-  ) {
+  ): Promise<{ rows: any[] }> {
+    console.log("query", url, sql, params);
     let res: Response;
     try {
       res = await fetch(`${url}/run`, {
@@ -20,9 +21,7 @@ export function createClient(url: string, token: string) {
         }),
       });
     } catch (error: unknown) {
-      console.error(
-        `Connection to CRR-Server failed: ${getErrorMessage(error)}`
-      );
+      console.error("Connection to CRR-Server failed", error);
       return {
         rows: [],
       };
@@ -51,12 +50,16 @@ export function createClient(url: string, token: string) {
       console.error(
         `Failed to parse response from CRR-Server: ${getErrorMessage(error)}`
       );
+      return {
+        rows: [],
+      };
     }
   };
 }
 
 export function createMigratorClient(url: string, token: string) {
   return async function CRRMigratorClient(queries: string[]) {
+    console.log("migrations", queries);
     const res = await fetch(`${url}/migrate`, {
       method: "POST",
       headers: {
