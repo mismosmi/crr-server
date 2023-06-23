@@ -41,7 +41,6 @@ impl AppState {
 pub struct AppEnv {
     data_dir: PathBuf,
     disable_validation: bool,
-    admin_token: Option<String>,
 }
 
 impl AppEnv {
@@ -53,7 +52,6 @@ impl AppEnv {
                 std::env::var("CRR_DATA_DIR").unwrap_or_else(|_| "./data".to_owned()),
             ),
             disable_validation,
-            admin_token: std::env::var("CRR_ADMIN_TOKEN").ok(),
         }
     }
 
@@ -71,7 +69,6 @@ impl AppEnv {
         let app_env = Arc::new(AppEnv {
             data_dir,
             disable_validation: false,
-            admin_token: None,
         });
         let auth = AuthDatabase::open(Arc::clone(&app_env)).expect("Failed to open AuthDatabase");
 
@@ -87,10 +84,6 @@ impl AppEnv {
 
     pub(crate) fn disable_validation(&self) -> bool {
         self.disable_validation
-    }
-
-    pub(crate) fn admin_token(&self) -> &Option<String> {
-        &self.admin_token
     }
 
     pub fn test_db(&self) -> crate::database::Database {

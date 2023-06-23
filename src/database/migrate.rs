@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
-use crate::{auth::AuthDatabase, error::CRRError, AppState};
+use crate::{auth::DatabasePermissions, error::CRRError, AppState};
 use axum::extract::{Json, Path, State};
-use axum_extra::extract::CookieJar;
 use lazy_static::lazy_static;
 use regex::Regex;
 use rusqlite::Connection;
@@ -17,13 +14,10 @@ pub(crate) struct MigratePostData {
 
 pub(crate) async fn post_migrate(
     Path(db_name): Path<String>,
-    cookies: CookieJar,
+    permissions: DatabasePermissions,
     State(state): State<AppState>,
     Json(data): Json<MigratePostData>,
 ) -> Result<(), CRRError> {
-    let permissions =
-        AuthDatabase::open(Arc::clone(state.env()))?.authorize_migration(&cookies, &db_name)?;
-
     state.change_manager().kill_connection(&db_name).await;
 
     let mut db = Database::open(&state.env(), db_name, permissions)?;
@@ -108,7 +102,18 @@ impl MigrationMode {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{app_state::AppEnv, database::migrate::MigrationMode};
+    use axum::{
+        extract::{Path, State},
+        Json,
+    };
+    use tracing_test::traced_test;
+
+    use super::{post_migrate, MigratePostData};
+    use crate::{
+        app_state::{AppEnv, AppState},
+        auth::DatabasePermissions,
+        database::migrate::MigrationMode,
+    };
 
     #[test]
     fn detect_migration_mode() {
@@ -150,5 +155,22 @@ pub(crate) mod tests {
             .expect("failed to parse table names");
 
         assert!(tables.iter().find(|name| *name == "foo").is_some());
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn call_post_endpoint() {
+        let state = AppState::test_state();
+
+        post_migrate(
+            Path(AppEnv::TEST_DB_NAME.to_owned()),
+            DatabasePermissions::Full,
+            State(state.clone()),
+            Json(MigratePostData {
+                queries: vec!["CREATE TABLE test (id INTEGER PRIMARY KEY, val TEXT)".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
     }
 }

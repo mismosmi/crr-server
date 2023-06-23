@@ -4,6 +4,7 @@ use axum::{Router, Server};
 use crr_server::{app_state::AppState, auth::AuthDatabase, router};
 use rusqlite::params;
 use tokio::process::Command;
+use tracing_test::traced_test;
 
 async fn setup_and_install() {
     let out = Command::new("pnpm")
@@ -29,7 +30,7 @@ fn prepare_app(token: &str) -> Router<()> {
     let user_id = auth.last_insert_rowid();
 
     auth.prepare(
-        "INSERT INTO tokens (user_id, token, expires) VALUES (?, ?, JULIANDAY('now') + 1)",
+        "INSERT INTO tokens (user_id, token, expires) VALUES (?, ?, DATE('now', '+1 day'))",
     )
     .unwrap()
     .insert(params![user_id, token])
@@ -39,24 +40,25 @@ fn prepare_app(token: &str) -> Router<()> {
 }
 
 async fn run_tests(url: &str, token: &str) {
-    let status = Command::new("pnpm")
+    let output = Command::new("pnpm")
         .current_dir(std::fs::canonicalize("drizzle").unwrap())
         .env("CRR_SERVER_URL", url)
         .env("CRR_SERVER_TOKEN", token)
         .arg("test")
-        .status()
+        .output()
         .await
         .unwrap();
 
+    tracing::info!("{}", String::from_utf8(output.stdout).unwrap());
+    tracing::error!("{}", String::from_utf8(output.stderr).unwrap());
     //println!("{}", String::from_utf8(out.stderr).unwrap());
 
-    assert!(status.success());
+    assert!(output.status.success());
 }
 
+#[traced_test]
 #[tokio::test]
 async fn run_migrations() {
-    tracing_subscriber::fmt::init();
-
     setup_and_install().await;
 
     let token = nanoid::nanoid!();

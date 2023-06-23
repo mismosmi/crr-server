@@ -18,6 +18,8 @@ const CHANGE_BUFFER_SIZE: usize = 1_000_000;
 
 #[cfg(test)]
 mod tests {
+    use tracing_test::traced_test;
+
     use crate::{
         app_state::{AppEnv, AppState},
         database::{
@@ -102,9 +104,9 @@ mod tests {
         assert_eq!(changeset.table(), "foo")
     }
 
+    #[traced_test]
     #[test]
     fn sync_changes_to_database() {
-        tracing_subscriber::fmt::init();
         let env_a = AppEnv::test_env();
         setup_foo(&env_a);
         let env_b = AppEnv::test_env();

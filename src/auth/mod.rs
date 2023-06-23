@@ -11,6 +11,7 @@ mod token;
 
 pub use database::AuthDatabase;
 pub(crate) use permissions::{AllowedTables, DatabasePermissions};
+pub(crate) use token::Token;
 
 #[cfg(test)]
 pub(crate) use permissions::PartialPermissions;

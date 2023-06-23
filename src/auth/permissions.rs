@@ -5,12 +5,11 @@ use axum::{
     extract::{FromRequestParts, Path},
     http::request::Parts,
 };
-use axum_extra::extract::CookieJar;
 use serde::Deserialize;
 
 use crate::{app_state::AppState, error::CRRError};
 
-use super::AuthDatabase;
+use super::{AuthDatabase, Token};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub(crate) struct PartialPermissions {
@@ -50,6 +49,7 @@ impl ObjectPermissions {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn full(&self) -> bool {
         match self {
             Self::Full => true,
@@ -145,23 +145,23 @@ impl DatabasePermissions {
         }
     }
 
-    pub(crate) fn apply<F>(&self, mut f: F) -> Result<(), CRRError>
-    where
-        F: FnMut(Option<&str>, ObjectPermissions) -> Result<(), CRRError>,
-    {
-        match self {
-            Self::Full => f(None, ObjectPermissions::Full),
-            Self::Partial { database, tables } => {
-                f(None, ObjectPermissions::Partial(database.clone()))?;
+    //pub(crate) fn apply<F>(&self, mut f: F) -> Result<(), CRRError>
+    //where
+    //    F: FnMut(Option<&str>, ObjectPermissions) -> Result<(), CRRError>,
+    //{
+    //    match self {
+    //        Self::Full => f(None, ObjectPermissions::Full),
+    //        Self::Partial { database, tables } => {
+    //            f(None, ObjectPermissions::Partial(database.clone()))?;
 
-                for (table_name, permissions) in tables {
-                    f(Some(table_name), permissions.clone())?;
-                }
+    //            for (table_name, permissions) in tables {
+    //                f(Some(table_name), permissions.clone())?;
+    //            }
 
-                Ok(())
-            }
-        }
-    }
+    //            Ok(())
+    //        }
+    //    }
+    //}
 
     pub(crate) fn full(&self) -> bool {
         match self {
@@ -273,12 +273,12 @@ impl FromRequestParts<AppState> for DatabasePermissions {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let cookies = CookieJar::from_request_parts(parts, state).await?;
-        let PathParams { db_name } = Path::<PathParams>::from_request_parts(parts, state)
-            .await?
-            .0;
-        let auth = AuthDatabase::open_readonly(state.env().clone())?;
-        auth.get_permissions(&cookies, &db_name)
+        let Token(token) = Token::from_request_parts(parts, state).await?;
+        let Path(PathParams { db_name }) =
+            Path::<PathParams>::from_request_parts(parts, state).await?;
+
+        let auth = AuthDatabase::open(state.env().clone())?;
+        auth.get_permissions(&token, &db_name)
     }
 }
 

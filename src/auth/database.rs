@@ -1,20 +1,17 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
 use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
-use axum_extra::extract::CookieJar;
-use rusqlite::{named_params, OpenFlags};
+use rusqlite::named_params;
 
 use crate::{
     app_state::{AppEnv, AppState},
-    database::Database,
     error::CRRError,
 };
 
-use super::{permissions::PartialPermissions, DatabasePermissions, COOKIE_NAME};
+use super::{permissions::PartialPermissions, DatabasePermissions};
 
 pub struct AuthDatabase {
     conn: rusqlite::Connection,
-    env: Arc<AppEnv>,
 }
 
 impl AuthDatabase {
@@ -29,17 +26,6 @@ impl AuthDatabase {
     pub fn open(env: Arc<AppEnv>) -> Result<Self, CRRError> {
         Ok(Self {
             conn: rusqlite::Connection::open(Self::file_path(&env))?,
-            env,
-        })
-    }
-
-    pub(crate) fn open_readonly(env: Arc<AppEnv>) -> Result<Self, CRRError> {
-        Ok(Self {
-            conn: rusqlite::Connection::open_with_flags(
-                Self::file_path(&env),
-                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            )?,
-            env,
         })
     }
 
@@ -52,13 +38,19 @@ impl AuthDatabase {
 
     fn authenticate_user(&self, token: &str) -> Result<i64, CRRError> {
         let id: i64 = self
-            .prepare("SELECT user_id FROM tokens WHERE token = :token AND expires > 'now'")?
+            .prepare("SELECT user_id FROM tokens WHERE token = :token AND expires < 'now'")?
             .query_row(
                 named_params! {
                     ":token": token
                 },
                 |row| row.get(0),
-            )?;
+            )
+            .map_err(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    CRRError::Unauthorized("Invalid Token".to_owned())
+                }
+                error => error.into(),
+            })?;
 
         Ok(id)
     }
@@ -135,20 +127,11 @@ impl AuthDatabase {
 
     pub(crate) fn get_permissions(
         &self,
-        cookies: &CookieJar,
+        token: &str,
         db_name: &str,
     ) -> Result<DatabasePermissions, CRRError> {
         if Self::RESERVED_NAMES.contains(&db_name) {
             return Err(CRRError::ReservedName(db_name.to_owned()));
-        }
-
-        let token = cookies
-            .get(COOKIE_NAME)
-            .ok_or(CRRError::Unauthorized("No Token found".to_string()))?
-            .value();
-
-        if Some(token) == self.env.admin_token().as_deref() {
-            return Ok(DatabasePermissions::Full);
         }
 
         let user_id = self.authenticate_user(token)?;
@@ -156,99 +139,98 @@ impl AuthDatabase {
         let permissions = self.get_permissions_for_user(user_id, db_name)?;
 
         if permissions.is_empty() {
-            return Err(CRRError::unauthorized(format!(
-                "User has no access to database {}",
-                db_name
-            )));
+            if self.database_exists(db_name)? {
+                return Err(CRRError::unauthorized(format!(
+                    "User has no access to database {}",
+                    db_name
+                )));
+            } else {
+                return self.create_owning_role(user_id, db_name);
+            }
         }
 
         Ok(permissions)
     }
 
-    pub(crate) fn authorize_migration(
-        &self,
-        cookies: &CookieJar,
-        db_name: &str,
-    ) -> Result<DatabasePermissions, CRRError> {
-        let token = cookies
-            .get(COOKIE_NAME)
-            .ok_or(CRRError::Unauthorized("No Token found".to_string()))?
-            .value();
+    //pub(crate) fn update_permissions(
+    //    &self,
+    //    role_id: i64,
+    //    database_name: &str,
+    //    permissions: &DatabasePermissions,
+    //) -> Result<(), CRRError> {
+    //    let query = "
+    //        INSERT INTO permissions
+    //            (role_id, database_name, table_name, pread, pinsert, pupdate, pdelete, pfull)
+    //        VALUES
+    //            (:role_id, :database_name, :table_name, :pread, :pinsert, :pupdate, :pdelete, :pfull)
+    //        ON CONFLICT (role_id, database_name, table_name)
+    //        DO UPDATE SET
+    //            pread = excluded.pread,
+    //            pinsert = excluded.pinsert,
+    //            pupdate = excluded.pupdate,
+    //            pdelete = excluded.pdelete,
+    //            pfull = excluded.pfull;
+    //    ";
 
-        if Some(token) == self.env.admin_token().as_deref() {
-            return Ok(DatabasePermissions::Full);
-        }
+    //    let mut stmt = self.prepare(query)?;
 
-        let user_id = self.authenticate_user(token)?;
+    //    permissions.apply(|table_name, permissions| {
+    //        stmt.execute(named_params! {
+    //            ":role_id": role_id,
+    //            ":database_name": database_name,
+    //            ":table_name": table_name,
+    //            ":pread": permissions.read(),
+    //            ":pinsert": permissions.insert(),
+    //            ":pupdate": permissions.update(),
+    //            ":pdelete": permissions.delete(),
+    //            ":pfull": permissions.full()
+    //        })?;
 
-        match self.get_permissions(cookies, db_name) {
-            Err(CRRError::Unauthorized(message)) => {
-                let file: PathBuf = Database::file_path(&self.env, &db_name).into();
-                if file.exists() {
-                    Err(CRRError::Unauthorized(message))
-                } else {
-                    let permissions = DatabasePermissions::Full;
+    //        Ok(())
+    //    })
+    //}
 
-                    self.conn.execute("BEGIN", [])?;
+    fn database_exists(&self, db_name: &str) -> Result<bool, CRRError> {
+        let mut stmt =
+            self.prepare("SELECT role_id FROM permissions WHERE database_name = :database_name")?;
 
-                    let role_id = self
-                        .conn
-                        .prepare("INSERT INTO roles () VALUES ()")?
-                        .insert([])?;
-
-                    self.conn
-                        .prepare(
-                            "INSERT INTO user_roles (user_id, role_id) VALUES (:user_id, :role_id)",
-                        )?
-                        .insert(named_params! {":user_id": user_id, ":role_id": role_id})?;
-
-                    self.update_permissions(role_id, db_name, &permissions)?;
-
-                    self.conn.execute("COMMIT", [])?;
-
-                    Ok(permissions)
-                }
-            }
-            result => result,
-        }
+        Ok(stmt.exists(named_params! { ":database_name": db_name })?)
     }
 
-    pub(crate) fn update_permissions(
+    fn create_owning_role(
         &self,
-        role_id: i64,
-        database_name: &str,
-        permissions: &DatabasePermissions,
-    ) -> Result<(), CRRError> {
-        let query = "
-            INSERT INTO permissions
-                (role_id, database_name, table_name, pread, pinsert, pupdate, pdelete, pfull) 
-            VALUES 
-                (:role_id, :database_name, :table_name, :pread, :pinsert, :pupdate, :pdelete, :pfull) 
-            ON CONFLICT (role_id, database_name, table_name)
-            DO UPDATE SET
-                pread = excluded.pread,
-                pinsert = excluded.pinsert,
-                pupdate = excluded.pupdate,
-                pdelete = excluded.pdelete,
-                pfull = excluded.pfull;
-        ";
+        user_id: i64,
+        db_name: &str,
+    ) -> Result<DatabasePermissions, CRRError> {
+        self.execute("BEGIN", [])?;
 
-        let mut stmt = self.prepare(query)?;
+        {
+            let mut stmt = self.prepare("INSERT INTO roles (name) VALUES (:role_name)")?;
+            stmt.insert(named_params! { ":role_name": format!("{}_owners", db_name) })?;
+        }
 
-        permissions.apply(|table_name, permissions| {
-            stmt.execute(named_params! {
+        let role_id = self.last_insert_rowid();
+
+        {
+            let mut stmt = self
+                .prepare("INSERT INTO user_roles (user_id, role_id) VALUES (:user_id, :role_id)")?;
+            stmt.insert(named_params! {
+                ":user_id": user_id,
                 ":role_id": role_id,
-                ":database_name": database_name,
-                ":table_name": table_name,
-                ":pread": permissions.read(),
-                ":pinsert": permissions.insert(),
-                ":pupdate": permissions.update(),
-                ":pdelete": permissions.delete(),
-                ":pfull": permissions.full()
             })?;
+        }
 
-            Ok(())
-        })
+        {
+            let mut stmt = self.prepare("INSERT INTO permissions (role_id, database_name, pfull) VALUES (:role_id, :db_name, TRUE)")?;
+            stmt.insert(named_params! {
+                ":role_id": role_id,
+                ":db_name": db_name
+            })?;
+        }
+
+        self.execute("COMMIT", [])?;
+
+        Ok(DatabasePermissions::Full)
     }
 }
 

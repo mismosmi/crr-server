@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use axum::extract::{Json, State};
+use axum::{
+    async_trait,
+    extract::{FromRequestParts, Json, State},
+    http::request::Parts,
+};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use rusqlite::named_params;
 use serde::Deserialize;
@@ -8,7 +12,7 @@ use time::Duration;
 
 use crate::{app_state::AppState, error::CRRError};
 
-use super::database::AuthDatabase;
+use super::{database::AuthDatabase, COOKIE_NAME};
 
 #[derive(Deserialize)]
 pub(crate) struct TokenRequestData {
@@ -59,4 +63,24 @@ pub(crate) async fn post_token(
         .execute(named_params! { ":user_id": user_id, ":otp": data.otp })?;
 
     Ok(cookies)
+}
+
+pub(crate) struct Token(pub(crate) String);
+
+#[async_trait]
+impl FromRequestParts<AppState> for Token {
+    type Rejection = CRRError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let cookies = CookieJar::from_request_parts(parts, state).await?;
+        cookies
+            .get(COOKIE_NAME)
+            .ok_or(CRRError::Unauthorized(
+                "No CRR Server Token found".to_string(),
+            ))
+            .map(|cookie| Self(cookie.value().to_owned()))
+    }
 }

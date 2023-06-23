@@ -4,7 +4,7 @@ export function createClient(url: string, token: string) {
     params: any,
     method: "run" | "all" | "values" | "get"
   ): Promise<{ rows: any[] }> {
-    console.log("query", url, sql, params);
+    console.log("query", `${url}/run`, sql, params);
     let res: Response;
     try {
       res = await fetch(`${url}/run`, {
@@ -74,7 +74,11 @@ export function createMigratorClient(url: string, token: string) {
 
     if (!res.ok) {
       const { message } = await res.json();
-      throw new Error(`Failed to apply migrations: ${message}`);
+      throw new Error(
+        `Failed to apply migrations: ${message}\nQueries:\n${queries.join(
+          "\n"
+        )}`
+      );
     }
   };
 }

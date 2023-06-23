@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{backtrace::Backtrace, convert::Infallible};
 
 use axum::{
     extract::rejection::PathRejection,
@@ -12,8 +12,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CRRError {
-    #[error("Database Error: {0}")]
-    DatabaseError(#[from] rusqlite::Error),
+    #[error("Database Error: {0}\n{1}")]
+    DatabaseError(#[from] rusqlite::Error, Backtrace),
     #[error("Parser Error: {0}")]
     ParserError(#[from] std::string::FromUtf8Error),
     #[error("SMTP Error: {0}")]
@@ -59,7 +59,7 @@ pub(crate) struct HttpError {
 
 impl From<CRRError> for HttpError {
     fn from(value: CRRError) -> Self {
-        tracing::error!("{}", value.to_string());
+        tracing::error!("{}", value);
 
         match value {
             CRRError::Unauthorized(message) => Self {
