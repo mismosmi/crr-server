@@ -33,7 +33,7 @@ pub(crate) async fn post_run(
     let mut stmt = db.prepare(&data.sql)?;
     let column_count = stmt.column_count();
 
-    tracing::info!("{} {}", &data.method, &data.sql);
+    tracing::debug!("{} {}", &data.method, &data.sql);
 
     match &data.method[..] {
         "run" => {
