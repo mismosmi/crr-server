@@ -2,7 +2,6 @@ use crate::{auth::DatabasePermissions, error::CRRError, AppState};
 use axum::extract::{Json, Path, State};
 use lazy_static::lazy_static;
 use regex::Regex;
-use rusqlite::Connection;
 use serde::Deserialize;
 
 use super::Database;
@@ -22,13 +21,13 @@ pub(crate) async fn post_migrate(
 
     let mut db = Database::open(&state.env(), db_name, permissions)?;
 
-    db.apply_migrations(&data.queries)?;
+    db.apply_migrations(data.queries)?;
 
     Ok(())
 }
 
 impl Database {
-    pub(crate) fn apply_migrations(&mut self, migrations: &Vec<String>) -> Result<(), CRRError> {
+    pub(crate) fn apply_migrations(&mut self, migrations: Vec<String>) -> Result<(), CRRError> {
         if !self.permissions().full() {
             return Err(CRRError::Unauthorized(
                 "User must be authorized with full access to the database to apply migrations"
@@ -36,41 +35,44 @@ impl Database {
             ));
         }
 
+        let mut crr_migrations: Vec<String> = Vec::with_capacity(migrations.len() * 3 + 2);
+
+        for migration in migrations.into_iter() {
+            Self::enable_migration_crr(&mut crr_migrations, migration);
+        }
+
+        let joined_migrations: String = crr_migrations.join(";\n");
+
+        tracing::debug!("Run Migration\n{}", joined_migrations);
+
         let savepoint = self.savepoint()?;
 
-        for migration in migrations {
-            Self::apply_migration(&savepoint, migration)?;
-        }
+        savepoint.execute_batch(&joined_migrations)?;
+
+        savepoint
+            .prepare("INSERT INTO crr_server_migrations (sql) VALUES (?)")?
+            .insert([&joined_migrations])?;
 
         savepoint.commit()?;
 
         Ok(())
     }
 
-    fn apply_migration(conn: &Connection, sql: &str) -> Result<(), CRRError> {
-        lazy_static! {
-            static ref RE_CREATE: Regex = Regex::new(r"/CREATE TABLE\w(.+)\w\(/i")
-                .expect("Failed to compile create table regex");
-            static ref RE_ALTER: Regex = Regex::new(r"/ALTER TABLE\w(.+)\w/i")
-                .expect("Failed to compile create table regex");
-        }
-
-        match MigrationMode::detect(sql) {
+    fn enable_migration_crr(crr_migrations: &mut Vec<String>, sql: String) {
+        match MigrationMode::detect(&sql) {
             MigrationMode::Alter(table_name) => {
-                conn.query_row("SELECT crsql_begin_alter(?)", [&table_name], |_| Ok(()))?;
-                conn.execute_batch(sql)?;
-                conn.query_row("SELECT crsql_commit_alter(?)", [table_name], |_| Ok(()))?;
+                crr_migrations.push(format!("SELECT crsql_begin_alter('{}')", &table_name));
+                crr_migrations.push(sql);
+                crr_migrations.push(format!("SELECT crsql_commit_alter('{}')", table_name));
             }
             MigrationMode::Create(table_name) => {
-                conn.execute_batch(sql)?;
-                conn.query_row("SELECT crsql_as_crr(?)", [table_name], |_| Ok(()))?;
+                crr_migrations.push(sql);
+                crr_migrations.push(format!("SELECT crsql_as_crr('{}')", table_name));
             }
             MigrationMode::Other => {
-                conn.execute_batch(sql)?;
+                crr_migrations.push(sql);
             }
         }
-
-        Ok(())
     }
 }
 
@@ -136,7 +138,7 @@ pub(crate) mod tests {
             vec!["CREATE TABLE \"foo\" (id INTEGER PRIMARY KEY, bar TEXT)".to_string()];
 
         env.test_db()
-            .apply_migrations(&migrations)
+            .apply_migrations(migrations)
             .expect("Failed to apply migrations");
     }
 
@@ -164,10 +166,12 @@ pub(crate) mod tests {
 
         post_migrate(
             Path(AppEnv::TEST_DB_NAME.to_owned()),
-            DatabasePermissions::Full,
+            DatabasePermissions::Create,
             State(state.clone()),
             Json(MigratePostData {
-                queries: vec!["CREATE TABLE test (id INTEGER PRIMARY KEY, val TEXT)".to_string()],
+                queries: vec![
+                    "CREATE TABLE \"test\" (id INTEGER PRIMARY KEY, val TEXT)".to_string()
+                ],
             }),
         )
         .await

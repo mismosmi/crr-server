@@ -82,13 +82,14 @@ impl ObjectPermissions {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum DatabasePermissions {
     Full,
     Partial {
         database: PartialPermissions,
         tables: HashMap<String, ObjectPermissions>,
     },
+    Create,
 }
 
 impl Default for DatabasePermissions {
@@ -107,6 +108,7 @@ impl DatabasePermissions {
     pub(crate) fn set(&mut self, permissions: PartialPermissions) {
         match self {
             Self::Full => (),
+            Self::Create => (),
             Self::Partial { database, .. } => {
                 *database = permissions;
             }
@@ -126,6 +128,7 @@ impl DatabasePermissions {
 
                 f(table)
             }
+            Self::Create => (),
         }
     }
 
@@ -139,6 +142,7 @@ impl DatabasePermissions {
     pub(crate) fn is_empty(&self) -> bool {
         match self {
             Self::Full => false,
+            Self::Create => false,
             Self::Partial { database, tables } => {
                 return database.is_empty() && tables.is_empty();
             }
@@ -166,6 +170,7 @@ impl DatabasePermissions {
     pub(crate) fn full(&self) -> bool {
         match self {
             Self::Full => true,
+            Self::Create => true,
             _ => false,
         }
     }
@@ -174,6 +179,7 @@ impl DatabasePermissions {
     pub(crate) fn read(&self) -> bool {
         match self {
             Self::Full => true,
+            Self::Create => true,
             Self::Partial { database, .. } => database.read,
         }
     }
@@ -181,6 +187,7 @@ impl DatabasePermissions {
     pub(crate) fn insert(&self) -> bool {
         match self {
             Self::Full => true,
+            Self::Create => true,
             Self::Partial { database, .. } => database.insert,
         }
     }
@@ -188,6 +195,7 @@ impl DatabasePermissions {
     pub(crate) fn full_table(&self, table_name: &str) -> bool {
         match self {
             Self::Full => true,
+            Self::Create => true,
             Self::Partial { tables, .. } => {
                 tables.get(table_name).map(|p| p.full()).unwrap_or(false)
             }
@@ -196,6 +204,7 @@ impl DatabasePermissions {
     pub(crate) fn read_table(&self, table_name: &str) -> bool {
         match self {
             Self::Full => true,
+            Self::Create => true,
             Self::Partial { database, tables } => {
                 database.read || tables.get(table_name).map(|p| p.read()).unwrap_or(false)
             }
@@ -204,6 +213,7 @@ impl DatabasePermissions {
     pub(crate) fn update_table(&self, table_name: &str) -> bool {
         match self {
             Self::Full => true,
+            Self::Create => true,
             Self::Partial { database, tables } => {
                 database.update || tables.get(table_name).map(|p| p.update()).unwrap_or(false)
             }
@@ -212,6 +222,7 @@ impl DatabasePermissions {
     pub(crate) fn insert_table(&self, table_name: &str) -> bool {
         match self {
             Self::Full => true,
+            Self::Create => true,
             Self::Partial { database, tables } => {
                 database.insert || tables.get(table_name).map(|p| p.insert()).unwrap_or(false)
             }
@@ -220,6 +231,7 @@ impl DatabasePermissions {
     pub(crate) fn delete_table(&self, table_name: &str) -> bool {
         match self {
             Self::Full => true,
+            Self::Create => true,
             Self::Partial { database, tables } => {
                 database.delete || tables.get(table_name).map(|p| p.delete()).unwrap_or(false)
             }
@@ -229,6 +241,7 @@ impl DatabasePermissions {
     pub(crate) fn readable_tables(&self) -> AllowedTables {
         match self {
             Self::Full => AllowedTables::All,
+            Self::Create => AllowedTables::All,
             Self::Partial { database, tables } => {
                 if database.read {
                     AllowedTables::All
@@ -241,6 +254,13 @@ impl DatabasePermissions {
                     )
                 }
             }
+        }
+    }
+
+    pub(crate) fn create(&self) -> bool {
+        match self {
+            Self::Create => true,
+            _ => false,
         }
     }
 }

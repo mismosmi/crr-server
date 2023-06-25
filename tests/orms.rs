@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{fs::canonicalize, path::Path, time::Duration};
 
 use axum::{Router, Server};
 use crr_server::{app_state::AppState, auth::AuthDatabase, router};
@@ -6,9 +6,9 @@ use rusqlite::params;
 use tokio::process::Command;
 use tracing_test::traced_test;
 
-async fn setup_and_install() {
+async fn setup_and_install(path: &Path) {
     let out = Command::new("pnpm")
-        .current_dir(std::fs::canonicalize("drizzle").unwrap())
+        .current_dir(path)
         .arg("install")
         .output()
         .await
@@ -39,9 +39,9 @@ fn prepare_app(token: &str) -> Router<()> {
     router().with_state(state)
 }
 
-async fn run_tests(url: &str, token: &str) {
+async fn run_tests(path: &Path, url: &str, token: &str) {
     let output = Command::new("pnpm")
-        .current_dir(std::fs::canonicalize("drizzle").unwrap())
+        .current_dir(path)
         .env("CRR_SERVER_URL", url)
         .env("CRR_SERVER_TOKEN", token)
         .arg("test")
@@ -58,8 +58,10 @@ async fn run_tests(url: &str, token: &str) {
 
 #[traced_test]
 #[tokio::test]
-async fn run_migrations() {
-    setup_and_install().await;
+async fn drizzle() {
+    let path = canonicalize("drizzle").unwrap();
+
+    setup_and_install(&path).await;
 
     let token = nanoid::nanoid!();
 
@@ -71,7 +73,29 @@ async fn run_migrations() {
     server
         .with_graceful_shutdown(async {
             tokio::time::sleep(Duration::from_secs(5)).await;
-            run_tests(&format!("http://{}", url.to_string()), &token).await;
+            run_tests(&path, &format!("http://{}", url.to_string()), &token).await;
+        })
+        .await
+        .unwrap();
+}
+
+#[traced_test]
+#[tokio::test]
+async fn kysely() {
+    let path = canonicalize("kysely").unwrap();
+    setup_and_install(&path).await;
+
+    let token = nanoid::nanoid!();
+
+    let server = Server::bind(&"0.0.0.0:6841".parse().unwrap())
+        .serve(prepare_app(&token).into_make_service());
+
+    let url = server.local_addr();
+
+    server
+        .with_graceful_shutdown(async {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            run_tests(&path, &format!("http://{}", url.to_string()), &token).await;
         })
         .await
         .unwrap();

@@ -205,7 +205,7 @@ mod tests {
         let env = AppEnv::test_env();
 
         env.test_db()
-            .apply_migrations(&vec![
+            .apply_migrations(vec![
                 "CREATE TABLE \"foo\" (val TEXT PRIMARY KEY)".to_string(),
                 "CREATE TABLE \"bar\" (val TEXT PRIMARY KEY)".to_string(),
                 "INSERT INTO foo (val) VALUES ('a')".to_string(),

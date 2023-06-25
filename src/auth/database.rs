@@ -230,7 +230,7 @@ impl AuthDatabase {
 
         self.execute("COMMIT", [])?;
 
-        Ok(DatabasePermissions::Full)
+        Ok(DatabasePermissions::Create)
     }
 }
 

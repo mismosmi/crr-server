@@ -56,6 +56,14 @@ impl Database {
         Ok(())
     }
 
+    fn init_migrations(conn: &rusqlite::Connection) -> Result<(), CRRError> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS crr_server_migrations (id INTEGER PRIMARY KEY, sql TEXT)",
+            [],
+        )?;
+        Ok(())
+    }
+
     fn set_authorizer(conn: &rusqlite::Connection, permissions: DatabasePermissions) {
         fn auth(value: bool) -> Authorization {
             if value {
@@ -88,6 +96,11 @@ impl Database {
         let conn = rusqlite::Connection::open(Self::file_path(env, &name))?;
 
         Self::load_crsqlite(&conn)?;
+
+        if permissions.create() {
+            Self::init_migrations(&conn)?;
+        }
+
         Self::set_authorizer(&conn, permissions.clone());
 
         Ok(Self {

@@ -92,7 +92,7 @@ impl AppEnv {
         Database::open(
             self,
             Self::TEST_DB_NAME.to_owned(),
-            DatabasePermissions::Full,
+            DatabasePermissions::Create,
         )
         .expect("Failed to open Test Database")
     }
