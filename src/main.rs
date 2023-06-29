@@ -1,12 +1,5 @@
 use axum::Server;
-use clap::Parser;
 pub(crate) use crr_server::{app_state::AppState, auth::AuthDatabase, router};
-
-#[derive(Parser)]
-struct Cli {
-    #[arg(long)]
-    disable_validation: bool,
-}
 
 #[tokio::main]
 async fn main() {
@@ -14,9 +7,7 @@ async fn main() {
 
     dotenv::dotenv().expect("Failed to read environment");
 
-    let cli = Cli::parse();
-
-    let state = AppState::init(!cli.disable_validation);
+    let state = AppState::init();
 
     let auth = AuthDatabase::open(state.env().clone()).expect("Failed to open Auth Database");
 

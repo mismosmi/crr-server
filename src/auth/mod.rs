@@ -1,12 +1,16 @@
-use axum::{routing::post, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 
 use crate::app_state::AppState;
 
-use self::{otp::post_otp, token::post_token};
+use self::{otp::post_otp, signed_url::get_signed_url, token::post_token};
 
 mod database;
 mod otp;
 mod permissions;
+mod signed_url;
 mod token;
 
 pub use database::AuthDatabase;
@@ -22,4 +26,5 @@ pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/otp", post(post_otp))
         .route("/token", post(post_token))
+        .route("/signed-url", get(get_signed_url))
 }

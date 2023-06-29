@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     auth::{AllowedTables, DatabasePermissions},
-    database::Database,
+    database::{changes::Message, Database},
     error::{CRRError, HttpError},
     AppState,
 };
@@ -22,6 +22,7 @@ pub(crate) struct StreamChangesQuery {
     #[serde(with = "crate::serde_base64")]
     site_id: Vec<u8>,
     db_version: i64,
+    schema_version: i64,
 }
 
 pub(crate) async fn stream_changes(
@@ -30,18 +31,27 @@ pub(crate) async fn stream_changes(
     State(state): State<AppState>,
     permissions: DatabasePermissions,
 ) -> Result<Sse<impl Stream<Item = Result<Event, HttpError>>>, CRRError> {
+    if permissions.create() {
+        Database::create(state.env(), &db_name)?;
+    }
+    tracing::debug!("lets go");
     let mut subscription = state
         .change_manager()
         .subscribe(state.env(), &db_name)
         .await?;
-    let db = Mutex::new(Database::open_readonly(
-        state.env(),
-        db_name,
-        query.db_version,
-        permissions.clone(),
-    )?);
+
+    tracing::debug!("open db now");
+    let db = Database::open_readonly(state.env(), db_name, query.db_version, permissions.clone())?;
+    let initial_migrations = db.migrations(query.schema_version)?;
+    let db = Mutex::new(db);
 
     Ok(Sse::new(try_stream! {
+        let mut schema_version = query.schema_version;
+        for migration in initial_migrations.into_iter() {
+            schema_version = migration.version();
+            yield Event::try_from(migration)?;
+        }
+
         for message in db.lock().await.changes(&query.site_id)? {
             yield Event::try_from(message?)?;
         }
@@ -51,23 +61,34 @@ pub(crate) async fn stream_changes(
 
         while let Ok(message) = subscription.recv().await {
             tracing::debug!("Stream Subscription received Message {:?}", message);
-            let changeset = message?;
+            match message {
+                Message::Change(changeset) => {
+                    if !permissions.read_table(changeset.table()) {
+                        continue;
+                    }
 
-            if !permissions.read_table(changeset.table()) {
-                continue;
+                    if changeset.db_version() < db_version {
+                        continue;
+                    }
+
+                    if changeset.site_id() == &query.site_id {
+                        continue;
+                    }
+
+                    db_version = changeset.db_version();
+
+                    yield Event::try_from(changeset)?;
+                },
+                Message::Migration(migration) => {
+                    if migration.version() > schema_version {
+                        schema_version = migration.version();
+                        yield Event::try_from(migration)?;
+                    }
+                },
+                Message::Error(error) => {
+                    yield Err(error)?;
+                }
             }
-
-            if changeset.db_version() < db_version {
-                continue;
-            }
-
-            if changeset.site_id() == &query.site_id {
-                continue;
-            }
-
-            db_version = changeset.db_version();
-
-            yield Event::try_from(changeset)?;
         }
 
     }))
@@ -164,12 +185,18 @@ mod tests {
         body::{BoxBody, HttpBody},
         extract::{Path, Query, State},
         response::{IntoResponse, Response},
+        Json,
     };
+    use tracing_test::traced_test;
 
     use crate::{
         app_state::{AppEnv, AppState},
         auth::{DatabasePermissions, PartialPermissions},
-        database::{changes::Changeset, migrate::tests::setup_foo, Database, Value},
+        database::{
+            changes::{Changeset, Migration},
+            migrate::{post_migrate, tests::setup_foo, MigratePostData},
+            Database, Value,
+        },
         error::CRRError,
     };
 
@@ -205,7 +232,7 @@ mod tests {
         let env = AppEnv::test_env();
 
         env.test_db()
-            .apply_migrations(vec![
+            .apply_migration(vec![
                 "CREATE TABLE \"foo\" (val TEXT PRIMARY KEY)".to_string(),
                 "CREATE TABLE \"bar\" (val TEXT PRIMARY KEY)".to_string(),
                 "INSERT INTO foo (val) VALUES ('a')".to_string(),
@@ -277,6 +304,7 @@ mod tests {
             Query(super::StreamChangesQuery {
                 site_id: Vec::new(),
                 db_version: 0,
+                schema_version: 1,
             }),
             State(state.clone()),
             DatabasePermissions::Full,
@@ -287,7 +315,7 @@ mod tests {
 
         let mut body = res.into_body();
 
-        let changeset = read_event(&mut body).await;
+        let changeset = read_change_event(&mut body).await;
         assert_eq!(changeset.table(), "foo");
         assert_eq!(changeset.cid(), Some("bar"));
 
@@ -300,24 +328,71 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            read_event(&mut body).await.val(),
+            read_change_event(&mut body).await.val(),
             &Value::Text("'bar'".to_owned())
         );
         assert_eq!(
-            read_event(&mut body).await.val(),
+            read_change_event(&mut body).await.val(),
             &Value::Text("'baz'".to_owned())
         );
     }
 
-    async fn read_event(body: &mut BoxBody) -> Changeset {
-        let event = body
+    async fn read_change_event(body: &mut BoxBody) -> Changeset {
+        let event_data = body
             .data()
             .await
             .expect("Stream is empty")
             .expect("Received Error");
 
-        assert!(event.starts_with("event:change\ndata:".as_bytes()));
-        let data = event.slice(18..);
+        assert!(event_data.starts_with("event:change\ndata:".as_bytes()));
+        let data = event_data.slice(18..);
         serde_json::from_slice(&data).expect("Failed to parse response data")
+    }
+
+    async fn read_migration_event(body: &mut BoxBody) -> Migration {
+        let event_data = body
+            .data()
+            .await
+            .expect("Stream is empty")
+            .expect("Received Error");
+
+        assert!(event_data.starts_with("event:migration\ndata:".as_bytes()));
+        let data = event_data.slice(21..);
+        serde_json::from_slice(&data).expect("Failed to parse response data")
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn receive_streamed_migration() {
+        let state = AppState::test_state();
+
+        let res: Response = stream_changes(
+            Path(AppEnv::TEST_DB_NAME.to_owned()),
+            Query(super::StreamChangesQuery {
+                site_id: Vec::new(),
+                db_version: 0,
+                schema_version: 0,
+            }),
+            State(state.clone()),
+            DatabasePermissions::Create,
+        )
+        .await
+        .expect("Failed to start stream")
+        .into_response();
+
+        let mut body = res.into_body();
+
+        post_migrate(
+            Path(AppEnv::TEST_DB_NAME.to_owned()),
+            DatabasePermissions::Full,
+            State(state.clone()),
+            Json(MigratePostData {
+                queries: vec!["CREATE TABLE foo (bar text)".to_owned()],
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(read_migration_event(&mut body).await.version(), 1);
     }
 }

@@ -1,12 +1,8 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
-use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
 use rusqlite::named_params;
 
-use crate::{
-    app_state::{AppEnv, AppState},
-    error::CRRError,
-};
+use crate::{app_state::AppEnv, error::CRRError};
 
 use super::{permissions::PartialPermissions, DatabasePermissions};
 
@@ -232,6 +228,22 @@ impl AuthDatabase {
 
         Ok(DatabasePermissions::Create)
     }
+
+    pub(crate) fn get_token_id(&self, token: &str) -> Result<i64, CRRError> {
+        Ok(
+            self.query_row("SELECT id FROM tokens WHERE token = ?", [token], |row| {
+                row.get("id")
+            })?,
+        )
+    }
+
+    pub(crate) fn get_token_by_id(&self, token_id: i64) -> Result<String, CRRError> {
+        Ok(
+            self.query_row("SELECT token FROM tokens WHERE id = ?", [token_id], |row| {
+                row.get("token")
+            })?,
+        )
+    }
 }
 
 impl std::ops::Deref for AuthDatabase {
@@ -245,18 +257,6 @@ impl std::ops::Deref for AuthDatabase {
 impl std::ops::DerefMut for AuthDatabase {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.conn
-    }
-}
-
-#[async_trait]
-impl FromRequestParts<AppState> for AuthDatabase {
-    type Rejection = CRRError;
-
-    async fn from_request_parts(
-        _parts: &mut Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        AuthDatabase::open(state.env().clone())
     }
 }
 

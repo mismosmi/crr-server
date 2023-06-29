@@ -15,7 +15,7 @@ pub(crate) struct OtpRequestData {
 pub(crate) async fn post_otp(
     State(state): State<AppState>,
     Json(data): Json<OtpRequestData>,
-) -> Result<String, CRRError> {
+) -> Result<(), CRRError> {
     let auth = AuthDatabase::open(Arc::clone(state.env()))?;
 
     let otp = nanoid::nanoid!();
@@ -30,10 +30,6 @@ pub(crate) async fn post_otp(
 
     stmt.insert(rusqlite::named_params! { ":email": data.email, ":otp": otp})?;
 
-    if state.env().disable_validation() {
-        return Ok(otp);
-    }
-
     crate::mail::send_email(&data.email, "Your OTP".to_owned(), otp)?;
-    Ok("".to_owned())
+    Ok(())
 }

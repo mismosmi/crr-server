@@ -4,11 +4,11 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Deserialize;
 
-use super::Database;
+use super::{changes::Migration, Database};
 
 #[derive(Deserialize)]
 pub(crate) struct MigratePostData {
-    queries: Vec<String>,
+    pub(crate) queries: Vec<String>,
 }
 
 pub(crate) async fn post_migrate(
@@ -17,17 +17,23 @@ pub(crate) async fn post_migrate(
     State(state): State<AppState>,
     Json(data): Json<MigratePostData>,
 ) -> Result<(), CRRError> {
-    state.change_manager().kill_connection(&db_name).await;
+    let mut db = Database::open(&state.env(), db_name.clone(), permissions)?;
 
-    let mut db = Database::open(&state.env(), db_name, permissions)?;
+    let migration = db.apply_migration(data.queries)?;
 
-    db.apply_migrations(data.queries)?;
+    state
+        .change_manager()
+        .publish_migration(&db_name, migration)
+        .await;
 
     Ok(())
 }
 
 impl Database {
-    pub(crate) fn apply_migrations(&mut self, migrations: Vec<String>) -> Result<(), CRRError> {
+    pub(crate) fn apply_migration(
+        &mut self,
+        migrations: Vec<String>,
+    ) -> Result<Migration, CRRError> {
         if !self.permissions().full() {
             return Err(CRRError::Unauthorized(
                 "User must be authorized with full access to the database to apply migrations"
@@ -55,35 +61,50 @@ impl Database {
 
         savepoint.commit()?;
 
-        Ok(())
+        Ok(Migration::new(self.last_insert_rowid(), joined_migrations))
     }
 
     fn enable_migration_crr(crr_migrations: &mut Vec<String>, sql: String) {
-        match MigrationMode::detect(&sql) {
-            MigrationMode::Alter(table_name) => {
+        match MigrationType::detect(&sql) {
+            MigrationType::Alter(table_name) => {
                 crr_migrations.push(format!("SELECT crsql_begin_alter('{}')", &table_name));
                 crr_migrations.push(sql);
                 crr_migrations.push(format!("SELECT crsql_commit_alter('{}')", table_name));
             }
-            MigrationMode::Create(table_name) => {
+            MigrationType::Create(table_name) => {
                 crr_migrations.push(sql);
                 crr_migrations.push(format!("SELECT crsql_as_crr('{}')", table_name));
             }
-            MigrationMode::Other => {
+            MigrationType::Other => {
                 crr_migrations.push(sql);
             }
         }
     }
+
+    pub(crate) fn migrations(&self, schema_version: i64) -> Result<Vec<Migration>, CRRError> {
+        let mut stmt =
+            self.prepare("SELECT version, \"sql\" FROM crr_server_migrations WHERE version > ?")?;
+
+        let mut rows = stmt.query([schema_version])?;
+
+        let mut migrations = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            migrations.push(Migration::new(row.get(0)?, row.get(1)?));
+        }
+
+        Ok(migrations)
+    }
 }
 
 #[derive(PartialEq, Debug)]
-enum MigrationMode {
+enum MigrationType {
     Create(String),
     Alter(String),
     Other,
 }
 
-impl MigrationMode {
+impl MigrationType {
     fn detect(sql: &str) -> Self {
         lazy_static! {
             static ref RE_CREATE: Regex =
@@ -114,22 +135,22 @@ pub(crate) mod tests {
     use crate::{
         app_state::{AppEnv, AppState},
         auth::DatabasePermissions,
-        database::migrate::MigrationMode,
+        database::migrate::MigrationType,
     };
 
     #[test]
     fn detect_migration_mode() {
         assert_eq!(
-            MigrationMode::detect("CREATE TABLE \"foo\" (value TEXT)"),
-            MigrationMode::Create("foo".to_owned())
+            MigrationType::detect("CREATE TABLE \"foo\" (value TEXT)"),
+            MigrationType::Create("foo".to_owned())
         );
         assert_eq!(
-            MigrationMode::detect("ALTER TABLE \"foo\" ADD COLUMN value TEXT"),
-            MigrationMode::Alter("foo".to_owned())
+            MigrationType::detect("ALTER TABLE \"foo\" ADD COLUMN value TEXT"),
+            MigrationType::Alter("foo".to_owned())
         );
         assert_eq!(
-            MigrationMode::detect("INSERT INTO \"foo\" (value) VALUES ('test')"),
-            MigrationMode::Other
+            MigrationType::detect("INSERT INTO \"foo\" (value) VALUES ('test')"),
+            MigrationType::Other
         );
     }
 
@@ -138,7 +159,7 @@ pub(crate) mod tests {
             vec!["CREATE TABLE \"foo\" (id INTEGER PRIMARY KEY, bar TEXT)".to_string()];
 
         env.test_db()
-            .apply_migrations(migrations)
+            .apply_migration(migrations)
             .expect("Failed to apply migrations");
     }
 

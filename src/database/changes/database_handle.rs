@@ -1,6 +1,6 @@
 use tokio::sync::{broadcast, mpsc};
 
-use super::Message;
+use super::{Message, Migration};
 
 pub(crate) type Subscription = broadcast::Receiver<Message>;
 
@@ -28,7 +28,7 @@ impl DatabaseHandle {
         self.message_sender.subscribe()
     }
 
-    pub(crate) fn connection_count(&self) -> usize {
-        self.message_sender.receiver_count()
+    pub(crate) fn publish_migration(&self, migration: Migration) {
+        let _ = self.message_sender.send(Message::Migration(migration));
     }
 }

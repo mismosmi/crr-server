@@ -16,6 +16,8 @@ pub enum CRRError {
     DatabaseError(#[from] rusqlite::Error, Backtrace),
     #[error("Parser Error: {0}")]
     ParserError(#[from] std::string::FromUtf8Error),
+    #[error("Invalid URL: {0}")]
+    InvalidURLError(#[from] url::ParseError),
     #[error("SMTP Error: {0}")]
     SmtpError(#[from] lettre::transport::smtp::Error),
     #[error("Mailing Error: {0}")]
@@ -42,6 +44,8 @@ pub enum CRRError {
     ReservedName(String),
     #[error("Invalid Path Parameter: {0}")]
     PathRejection(#[from] PathRejection),
+    #[error("Failed to decode Base64-String: {0}")]
+    Base64DecodeError(#[from] base64::DecodeError),
 }
 
 impl From<Infallible> for CRRError {

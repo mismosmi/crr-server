@@ -15,9 +15,9 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn init(disable_validation: bool) -> Self {
+    pub fn init() -> Self {
         Self {
-            env: Arc::new(AppEnv::load(disable_validation)),
+            env: Arc::new(AppEnv::load()),
             change_manager: ChangeManager::new(),
         }
     }
@@ -40,18 +40,16 @@ impl AppState {
 
 pub struct AppEnv {
     data_dir: PathBuf,
-    disable_validation: bool,
 }
 
 impl AppEnv {
     pub(crate) const TEST_DB_NAME: &str = "data";
 
-    fn load(disable_validation: bool) -> Self {
+    fn load() -> Self {
         Self {
             data_dir: PathBuf::from(
                 std::env::var("CRR_DATA_DIR").unwrap_or_else(|_| "./data".to_owned()),
             ),
-            disable_validation,
         }
     }
 
@@ -66,10 +64,7 @@ impl AppEnv {
 
         let _err = std::fs::create_dir_all(&data_dir);
 
-        let app_env = Arc::new(AppEnv {
-            data_dir,
-            disable_validation: false,
-        });
+        let app_env = Arc::new(AppEnv { data_dir });
         let auth = AuthDatabase::open(Arc::clone(&app_env)).expect("Failed to open AuthDatabase");
 
         auth.apply_migrations()
@@ -80,10 +75,6 @@ impl AppEnv {
 
     pub(crate) fn data_dir(&self) -> &Path {
         &self.data_dir
-    }
-
-    pub(crate) fn disable_validation(&self) -> bool {
-        self.disable_validation
     }
 
     pub fn test_db(&self) -> crate::database::Database {

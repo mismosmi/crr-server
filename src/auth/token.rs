@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use axum::{
     async_trait,
-    extract::{FromRequestParts, Json, State},
+    extract::TypedHeader,
+    extract::{FromRequestParts, Json, Query, State},
+    headers::{authorization::Bearer, Authorization},
     http::request::Parts,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -12,7 +14,7 @@ use time::Duration;
 
 use crate::{app_state::AppState, error::CRRError};
 
-use super::{database::AuthDatabase, COOKIE_NAME};
+use super::{database::AuthDatabase, signed_url::SignedRequestQuery, COOKIE_NAME};
 
 #[derive(Deserialize)]
 pub(crate) struct TokenRequestData {
@@ -76,11 +78,29 @@ impl FromRequestParts<AppState> for Token {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         let cookies = CookieJar::from_request_parts(parts, state).await?;
-        cookies
-            .get(COOKIE_NAME)
-            .ok_or(CRRError::Unauthorized(
-                "No CRR Server Token found".to_string(),
-            ))
-            .map(|cookie| Self(cookie.value().to_owned()))
+
+        if let Some(cookie) = cookies.get(COOKIE_NAME) {
+            return Ok(Self(cookie.value().to_owned()));
+        }
+
+        if let Ok(TypedHeader(token)) =
+            TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state).await
+        {
+            return Ok(Self(token.token().to_owned()));
+        }
+
+        if let Ok(Query(query)) =
+            Query::<SignedRequestQuery>::from_request_parts(parts, state).await
+        {
+            let auth = AuthDatabase::open(state.env().clone())?;
+
+            return Ok(Token(
+                query.validate(&auth, parts.uri.to_string().parse()?)?,
+            ));
+        }
+
+        Err(CRRError::Unauthorized(
+            "No CRR Server Token found".to_string(),
+        ))
     }
 }

@@ -4,7 +4,9 @@ use tokio::sync::broadcast::{self, error::SendError};
 
 use crate::{app_state::AppEnv, auth::DatabasePermissions, database::Database, error::CRRError};
 
-use super::{ChangesIter, Changeset, DatabaseHandle, Message, Subscription, CHANGE_BUFFER_SIZE};
+use super::{
+    ChangesIter, Changeset, DatabaseHandle, Message, Migration, Subscription, CHANGE_BUFFER_SIZE,
+};
 
 #[derive(Clone)]
 pub(crate) struct ChangeManager(
@@ -89,8 +91,20 @@ impl ChangeManager {
         let hook_signal_sender = signal_sender.downgrade();
 
         database.update_hook(Some(
-            move |_action, _arg1: &'_ str, _arg2: &'_ str, rowid| {
-                tracing::debug!("update hook triggered for row {}", rowid);
+            move |_action, _db_name: &'_ str, table_name: &'_ str, rowid| {
+                tracing::debug!(
+                    "update hook triggered for table {} row {}",
+                    &table_name,
+                    &rowid
+                );
+
+                if table_name.starts_with("__crsql")
+                    || table_name.starts_with("crsql")
+                    || table_name == "crr_server_migrations"
+                {
+                    return;
+                }
+
                 if let Some(sender) = hook_signal_sender.upgrade() {
                     let _ = sender.try_send(());
                 }
@@ -123,19 +137,16 @@ impl ChangeManager {
         sender: &broadcast::Sender<Message>,
     ) -> Result<(), SendError<Message>> {
         for message in database.all_changes() {
-            sender.send(message.map_err(Into::into))?;
+            sender.send(message.into())?;
         }
 
         Ok(())
     }
 
-    pub(crate) async fn kill_connection(&self, db_name: &str) {
-        if let Some(handle) = self.0.write().await.remove(db_name) {
-            tracing::info!(
-                "Killing {} open streams from database \"{}\"",
-                handle.connection_count(),
-                db_name,
-            );
+    pub(crate) async fn publish_migration(&self, db_name: &str, migration: Migration) {
+        let lock = self.0.read().await;
+        if let Some(handle) = lock.get(db_name) {
+            handle.publish_migration(migration);
         }
     }
 }

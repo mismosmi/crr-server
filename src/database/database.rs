@@ -58,7 +58,7 @@ impl Database {
 
     fn init_migrations(conn: &rusqlite::Connection) -> Result<(), CRRError> {
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS crr_server_migrations (id INTEGER PRIMARY KEY, sql TEXT)",
+            "CREATE TABLE IF NOT EXISTS crr_server_migrations (version INTEGER PRIMARY KEY, sql TEXT NOT NULL)",
             [],
         )?;
         Ok(())
@@ -109,6 +109,16 @@ impl Database {
             db_version: 0,
             permissions,
         })
+    }
+
+    pub(crate) fn create(env: &AppEnv, name: &str) -> Result<(), CRRError> {
+        let conn = rusqlite::Connection::open(Self::file_path(env, name))?;
+
+        Self::load_crsqlite(&conn)?;
+        Self::init_migrations(&conn)?;
+        conn.execute_batch("SELECT crsql_finalize()")?;
+
+        Ok(())
     }
 
     pub(crate) fn open_readonly(
@@ -186,7 +196,7 @@ impl std::ops::DerefMut for Database {
 impl std::ops::Drop for Database {
     fn drop(&mut self) {
         self.authorizer(None::<for<'r> fn(AuthContext<'r>) -> _>);
-        let _err = self.execute("SELECT crsql_finalize()", []);
+        let _err = self.execute_batch("SELECT crsql_finalize()");
     }
 }
 

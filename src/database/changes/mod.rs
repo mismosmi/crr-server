@@ -11,6 +11,7 @@ pub(crate) use changes_iter::ChangesIter;
 pub(crate) use changeset::Changeset;
 pub(crate) use database_handle::{DatabaseHandle, Subscription};
 pub(crate) use message::Message;
+pub(crate) use message::Migration;
 pub(crate) use post::post_changes;
 pub(crate) use stream::stream_changes;
 
@@ -97,6 +98,7 @@ mod tests {
             .recv()
             .await
             .expect("Failed to receive update")
+            .changeset()
             .expect("Failed to retrieve updates");
 
         println!("{:?}", &changeset);

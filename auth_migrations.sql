@@ -33,8 +33,9 @@ CREATE TABLE IF NOT EXISTS permissions (
 CREATE INDEX IF NOT EXISTS permissions_by_role_and_db ON permissions (role_id, database_name);
 
 CREATE TABLE IF NOT EXISTS tokens (
+    id INTEGER PRIMARY KEY,
     user_id INTEGER,
-    token TEXT PRIMARY KEY,
+    token TEXT UNIQUE NOT NULL,
     expires TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );

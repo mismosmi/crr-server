@@ -7,10 +7,9 @@ edition = "2021"
 
 [dependencies]
 async-stream = "0.3.5"
-axum = "0.6.18"
+axum = { version = "0.6.18", features = ["headers"] }
 axum-extra = { version = "0.7.4", features = ["cookie"] }
 base64 = "0.21.0"
-clap = { version = "4.3.3", features = ["derive"] }
 dotenv = "0.15.0"
 futures = "0.3.28"
 lazy_static = "1.4.0"
@@ -20,11 +19,13 @@ regex = "1.8.2"
 rusqlite = { version = "0.28.0", features = ["bundled", "load_extension", "hooks"]}
 serde = { version = "1.0.163", features = ["derive"] }
 serde_json = "1.0.96"
+sha2 = "0.10.7"
 thiserror = "1.0.40"
 time = "0.3.21"
 tokio = { version = "1.28.1", features = ["full"] }
 tracing = "0.1.37"
 tracing-subscriber = "0.3.17"
+url = "2.4.0"
 
 [dev-dependencies]
 tracing-test = { version = "0.2", features = ["no-env-filter"] }
